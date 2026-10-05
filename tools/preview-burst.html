@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>开天 · 限次爆发预览</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  「开天」（限次爆发卡）预览：三格竖排。
+    ① 长剑 · 待起转（抽到卡的瞬间：刀没变，HUD 徽标是暗的）
+    ② 长剑 · 生效中（半径 70 → 350）
+    ③ 长枪 · 生效中（半径 125 → 623：**刀尖飞出屏幕**，这是用户选的处理 1）
+
+  用途：这种"夸张"卡必须出图看 —— 刀会不会盖住人、HUD 徽标会不会压别的元素、
+  长枪那种出屏的刀看起来是"帅"还是"像 bug"，断言一个都抓不出来。
+
+  用法：bash tools/shot-boss.sh burst      产出 docs/burst-open-sky.png
+-->
+<canvas id="out" width="812" height="2050"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var W = 812, H = 375, CAP = 24;
+
+  function mkScene(kind) {
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(W, H);
+    g.updateSpawns = function () {};      // 预览不要杂兵
+    g.spawnFoe = function () {};
+    g.foes = []; g.projectiles = []; g.hazards = []; g.pickups = [];
+    g.state = 'play';
+    g.wave = 3; g.stageBossPending = true; g.trial.finished = false;
+    /* ⚠️ 武器要造**完整的物品对象**（makeDefaultWeapon），不能只写 {kind} ——
+       少了 color/rarity 这些字段，HUD 的装备栏会拿 undefined 去 hex 解析，整页报错
+       （表现是无头截图得到一张纯色图，看着像"版式就是空的"）。 */
+    var it = G.Progression.makeDefaultWeapon(G.Config);
+    it.id = 'pv-' + kind; it.kind = kind; it.name = G.Config.weapons[kind].name;
+    g.player.equip.weapon = it;
+    g.player.bag = [it];
+    g.Prog.recompute(g.player, G.Config);
+    // 放几只怪当背景，能看出"刀扫到哪儿"
+    for (var i = 0; i < 10; i++) {
+      var a = i / 10 * 6.283;
+      var f = G.Entities.makeFoe(G.Config, 'slime', g.player.x + Math.cos(a) * (150 + (i % 3) * 70), g.player.y + Math.sin(a) * (110 + (i % 3) * 60), 1, 1);
+      g.world.collide(f);
+      g.foes.push(f);
+    }
+    g.updateCamera();
+    return g;
+  }
+  function render(g) {
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var r = new G.Renderer(cv.getContext('2d'), {
+      cfg: G.Config,
+      createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+    });
+    r.resize(W, H);
+    r.draw(g, 1.0);
+    return cv;
+  }
+
+  var panels = [];
+
+  // ⓪ 平时（没有爆发卡）：**屏幕底排是空的** —— 武器技能行已删（用户口径"在武器库里面有"），
+  //    头顶只有血条 + 经验条两条。这一格是给"底排留空"验收用的。
+  var g0 = mkScene('sword');
+  g0.player.orbOn = true; g0.player.orbT = 1.4; g0.player.orbAng = 0.55;
+  panels.push({ title: '⓪ 平时：底排干净（技能行已删），头顶只有血/经验条', cv: render(g0) });
+
+  // ① 长剑 · 待起转：刀还是原来那么长，**头顶**徽标是暗的（底排不再放它）
+  var g1 = mkScene('sword');
+  g1.player.burst = { id: 'skyCut', name: '开天', left: 2, active: false, radiusMul: 5 };
+  g1.player.orbOn = true; g1.player.orbT = 1.4; g1.player.orbAng = 0.55;
+  panels.push({ title: '① 抽到卡 · 待起转：刀还是原样（头顶徽标是暗的）', cv: render(g1) });
+
+  // ② 长剑 · 生效中：半径 70 → 350
+  var g2 = mkScene('sword');
+  g2.player.burst = { id: 'skyCut', name: '开天', left: 2, active: true, radiusMul: 5 };
+  g2.player.orbOn = true; g2.player.orbT = 1.4; g2.player.orbAng = 0.55;
+  panels.push({ title: '② 长剑 · 生效中：半径 70 → 350（刀镀金边）', cv: render(g2) });
+
+  // ③ 长枪 · 生效中：半径 125 → 623，刀尖在屏幕外（用户选的处理 1）
+  var g3 = mkScene('spear');
+  g3.player.burst = { id: 'skyCut', name: '开天', left: 2, active: true, radiusMul: 5 };
+  g3.player.orbOn = true; g3.player.orbT = 1.4; g3.player.orbAng = 0.55;
+  panels.push({ title: '③ 长枪 · 生效中：半径 125 → 623（刀尖飞出屏幕，判定照常）', cv: render(g3) });
+
+  // ④ 千刃 · 生效中：窗口内直接变 6 把（刀真的多了，不是光轮）
+  var g4 = mkScene('sword');
+  g4.player.burst = { id: 'bladeStorm', name: '千刃', left: 2, active: true, radiusMul: 1, bladesSet: 6 };
+  g4.player.orbOn = true; g4.player.orbT = 1.4; g4.player.orbAng = 0.55;
+  panels.push({ title: '④ 千刃 · 生效中：刃数直接变 6 把（一圈全是刀）', cv: render(g4) });
+
+  // ⑤ 血刃 · 生效中：刀身染红 + 徽标转红（红刃 vs 平时的银刃一眼可辨）
+  var g5 = mkScene('sword');
+  g5.player.burst = { id: 'bloodBlade', name: '血刃', left: 2, active: true, radiusMul: 1,
+                      dmgMul: 3, healPerHit: 0.5, healCap: 20, tint: '#ff6b5a', healed: 6 };
+  g5.player.orbOn = true; g5.player.orbT = 1.4; g5.player.orbAng = 0.55;
+  panels.push({ title: '⑤ 血刃 · 生效中：刀身染红、徽标转红（伤害 ×3，命中回血封顶 20/刀）', cv: render(g5) });
+
+  var outCv = document.getElementById('out');
+  /* 高度按格数算出来，别再手写常量（加一格忘了改高度 = 最后一格被裁掉） */
+  outCv.width = 812;
+  outCv.height = panels.length * (H + CAP + 10) + CAP + 6;
+  var out = outCv.getContext('2d');
+  out.fillStyle = "#0d0f12"; out.fillRect(0, 0, outCv.width, outCv.height);
+  out.font = '600 13px "PingFang SC","Microsoft YaHei",monospace';
+  for (var k = 0; k < panels.length; k++) {
+    var y = k * (H + CAP + 10) + CAP + 6;
+    out.fillStyle = '#cfe9a8';
+    out.fillText(panels[k].title, 4, y - 7);
+    out.drawImage(panels[k].cv, 0, y);
+  }
+  document.title = 'READY ' + outCv.width + 'x' + outCv.height;
+  } catch (e) {
+    /* 预览页出错时必须**看得见**：否则无头截图只会得到一张纯色图，
+       看起来像"版式就是空白的"，查半天。title 会被 --dump-dom 抓出来。 */
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

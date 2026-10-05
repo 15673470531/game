@@ -1,0 +1,30 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>跑 4 帧</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style></head><body>
+<canvas id="out"></canvas>
+<script src="../core/config.js"></script><script src="../core/world.js"></script>
+<script src="../core/entities.js"></script><script src="../core/progression.js"></script>
+<script src="../core/save.js"></script><script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function(){try{
+var G=window.__GAME__, W=203,H=190,Z=2.3, out=document.getElementById('out');
+out.width=4*W; out.height=H+18;
+var R=new G.Renderer(out.getContext('2d'),{cfg:G.Config,createCanvas:function(w,h){var c=document.createElement('canvas');c.width=w;c.height=h;return c;}});
+R.resize(4*W,H+18);
+var g=new G.Game(G.Config,{World:G.World,Entities:G.Entities,Progression:G.Progression,Save:G.Save});
+g.setViewport(812,375);
+var P=g.player;P.x=400;P.y=300;P.face=0;P.dash=0;P.orbOn=false;P.moving=true;P.frenzy=0;P.slowT=0;P.comboStacks=0;
+var ctx=out.getContext('2d');
+var phases=[0.0,1.57,3.14,4.71];
+ctx.fillStyle='#cfe9a8';ctx.font='600 12px "PingFang SC","Microsoft YaHei",monospace';
+for(var i=0;i<4;i++){
+  var cx=i*W, cy=18;
+  ctx.fillStyle='#3f6b33';ctx.fillRect(cx+4,cy,W-8,H);
+  ctx.fillStyle='#cfe9a8';ctx.fillText('第 '+(i+1)+' 帧（bob 相位 '+phases[i]+'）',cx+8,cy-4);
+  P.bob=phases[i];
+  ctx.save();ctx.translate(cx+W/2,cy+H-26);ctx.scale(Z,Z);ctx.translate(-P.x,-P.y);
+  R.drawPlayer(P,1.0);ctx.restore();
+}
+document.title='READY '+out.width+'x'+out.height;
+}catch(e){document.title='ERR: '+(e&&e.message?e.message:e);}})();
+</script></body></html>

@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>试炼场 · 试卡面板预览</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  试炼场「试卡」面板预览：三格竖排。
+    ① 数值页（11 张：一格空着，看会不会显得"少了一张"）
+    ② 机制页 + 已经把「开天」试过了（金边 + 已试 1）
+    ③ 武器页 + 金色版开关打开（标签/说明都换成金色版，并按当前武器把别的武器的卡画淡）
+
+  这种"信息密度高"的面板必须出图看：断言只能保证"没超框"，看不了"挤不挤、读不读得清"。
+
+  用法：bash tools/shot-boss.sh cards      产出 docs/trial-cards.png
+-->
+<canvas id="out" width="812" height="1242"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var W = 812, H = 375, CAP = 24;
+
+  function mkScene() {
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(W, H);
+    g.state = 'play';
+    g.setTraining(true);              // 真试炼场：底部按钮栏、靶子都在
+    g.state = 'play';
+    var it = G.Progression.makeDefaultWeapon(G.Config);   // ⚠️ 要完整物品对象，少字段渲染层会崩
+    it.id = 'pv-sword'; it.kind = 'sword'; it.name = G.Config.weapons.sword.name;
+    g.player.equip.weapon = it; g.player.bag = [it];
+    g.Prog.recompute(g.player, G.Config);
+    g.updateCamera();
+    return g;
+  }
+  function render(g) {
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var r = new G.Renderer(cv.getContext('2d'), {
+      cfg: G.Config,
+      createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+    });
+    r.resize(W, H);
+    r.draw(g, 1.0);
+    return cv;
+  }
+
+  var panels = [];
+
+  // ① 数值页（11 张 → 12 格里空 1 个）
+  var g1 = mkScene();
+  g1.openTrialCards(); g1.trialCardCat = 'stat';
+  panels.push({ title: '① 试卡 · 数值页（11 张，最后一格空着）', cv: render(g1) });
+
+  // ② 机制页，且已经试过「开天」
+  var g2 = mkScene();
+  g2.openTrialCards(); g2.trialCardCat = 'mechanic';
+  g2.applyTrialCard('skyCut', false);
+  g2.applyTrialCard('exec', false);
+  panels.push({ title: '② 机制页 · 「开天」「处决」已试（金边 + 已试次数 + 右上角回执）', cv: render(g2) });
+
+  // ③ 武器页 + 金色版开关打开（别的武器的卡画淡并标「需XX」）
+  var g3 = mkScene();
+  g3.openTrialCards(); g3.trialCardCat = 'weapon'; g3.trialCardGold = true;
+  panels.push({ title: '③ 武器页 · 金色版开关打开（当前手持长剑 → 别的武器的卡画淡）', cv: render(g3) });
+
+  var out = document.getElementById('out').getContext('2d');
+  out.fillStyle = '#0d0f12'; out.fillRect(0, 0, 812, 1242);
+  out.font = '600 13px "PingFang SC","Microsoft YaHei",monospace';
+  for (var k = 0; k < panels.length; k++) {
+    var y = k * (H + CAP + 10) + CAP + 6;
+    out.fillStyle = '#cfe9a8';
+    out.fillText(panels[k].title, 4, y - 7);
+    out.drawImage(panels[k].cv, 0, y);
+  }
+  document.title = 'READY';
+  } catch (e) {
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

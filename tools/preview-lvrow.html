@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>左上卡 · Lv 行（击杀/金币）四方案</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  「Lv 那一行」的四个方案对照（2026-10 用户："小刀图标画的不对、样式歪的都不在一行了"）。
+
+  这一行总共只有 136px（卡内容宽），要在里面放：Lv N ／ 击杀数 ／ 金币数。
+  四个方案只在"击杀那部分怎么表示"上有区别，金币一律用「黄色圆点 + 数字」：
+    ① ×128        —— 最省宽度，不会"画得不像"（乘号是通用的"数量"记号）
+    ② 小怪头 128  —— 画一只小怪（圆身+两只眼），"打了几只怪"一眼就懂，和游戏里的怪同一套造型
+    ③ 斜剑 128    —— 45° 斜置的短剑（竖着放的小剑在 12px 下就是一根棍子，不像剑）
+    ④ 击杀 128    —— 干脆用字（11px 小字），最直白，占宽也最多
+  ⚠️ 所有方案的图标/圆点**光学中线都对到数字的中线**（= 基线 - 4.5px），上一版就是飘高了 1.5px 才显得"不在一行"。
+
+  用法：bash tools/shot-boss.sh lvrow      产出 docs/lv-row-options.png
+-->
+<canvas id="out" width="812" height="430"></canvas>
+<script>
+(function () {
+  var out = document.getElementById('out');
+  var ctx = out.getContext('2d');
+  var FONT = '"PingFang SC","Microsoft YaHei",sans-serif';
+  out.width = 812; out.height = 430;
+  ctx.fillStyle = '#0d0f12'; ctx.fillRect(0, 0, 812, 430);
+
+  var CARD_W = 156, CARD_H = 40, PAD = 10, X0 = 20, ROWW = 136;
+
+  /* 一只小怪头（和游戏里的裂壳爬虫同一套造型：圆身 + 两只眼 + 两条腿） */
+  function monsterHead(x, y, col) {
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.ellipse(x, y, 5.6, 4.8, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#11161b';
+    ctx.beginPath(); ctx.arc(x - 2.1, y - 0.6, 1.25, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(x + 2.1, y - 0.6, 1.25, 0, 7); ctx.fill();
+    ctx.strokeStyle = col; ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(x - 3.4, y + 4); ctx.lineTo(x - 4.6, y + 6.6);
+    ctx.moveTo(x + 3.4, y + 4); ctx.lineTo(x + 4.6, y + 6.6);
+    ctx.stroke();
+  }
+  /* 45° 斜置的短剑（把装备栏那把长剑图标转过来 + 缩到 0.6） */
+  function swordIcon(x, y, col) {
+    ctx.save();
+    ctx.translate(x, y); ctx.rotate(-0.72); ctx.scale(0.60, 0.60);
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 2.6; ctx.lineJoin = 'round';
+    ctx.beginPath(); ctx.moveTo(0, 11); ctx.lineTo(0, -10); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(-4.6, 8.6); ctx.lineTo(4.6, 8.6); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(2, -7); ctx.lineTo(0, -4.6); ctx.lineTo(-2, -7);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  function goldDot(x, y) {
+    ctx.fillStyle = '#ffd166';
+    ctx.beginPath(); ctx.arc(x, y, 4.6, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    ctx.beginPath(); ctx.arc(x - 1.5, y - 1.6, 1.4, 0, 7); ctx.fill();
+  }
+
+  /* 画一行卡片内容（四个方案共用，只有击杀那部分不同） */
+  function drawRow(y, variant, zoom) {
+    var s = zoom || 1;
+    ctx.save();
+    ctx.translate(X0, y); ctx.scale(s, s);
+    /* 卡片底 */
+    ctx.fillStyle = 'rgba(6,10,14,.92)';
+    ctx.fillRect(0, 0, CARD_W, CARD_H);
+    ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(0.5, 0.5, CARD_W - 1, CARD_H - 1);
+
+    var baseY = 26;                                  // 文字基线（卡内坐标）
+    var midY = baseY - 4.5;                          // 光学中线：图标/圆点都对齐到这里
+    ctx.textBaseline = 'alphabetic';
+    ctx.textAlign = 'left';
+    /* Lv（和击杀/金币用同一个字号，避免"看着像两段"） */
+    ctx.font = '800 14px ' + FONT;
+    ctx.fillStyle = '#fff';
+    ctx.fillText('Lv 2', PAD, baseY);
+    var lvW = ctx.measureText('Lv 2').width;
+    var kx = PAD + lvW + 10;
+
+    if (variant === 1) {                             // ① ×128
+      ctx.font = '700 13px ' + FONT;
+      ctx.fillStyle = '#e8edf2';
+      ctx.fillText('\u00d7128', kx, baseY);
+    } else if (variant === 2) {                      // ② 小怪头 128
+      monsterHead(kx + 5.6, midY - 0.6, '#d8dee6');
+      ctx.font = '700 13px ' + FONT;
+      ctx.fillStyle = '#e8edf2';
+      ctx.fillText('128', kx + 13, baseY);
+    } else if (variant === 3) {                      // ③ 斜剑 128
+      swordIcon(kx + 6, midY, '#d8dee6');
+      ctx.font = '700 13px ' + FONT;
+      ctx.fillStyle = '#e8edf2';
+      ctx.fillText('128', kx + 14, baseY);
+    } else {                                         // ④ 击杀 128
+      ctx.font = '600 11px ' + FONT;
+      ctx.fillStyle = 'rgba(255,255,255,.62)';
+      ctx.fillText('击杀', kx, baseY - 1);
+      var kw = ctx.measureText('击杀').width;
+      ctx.font = '700 13px ' + FONT;
+      ctx.fillStyle = '#e8edf2';
+      ctx.fillText('128', kx + kw + 4, baseY);
+    }
+    /* 金币：圆点 + 数字（贴卡右缘） */
+    ctx.font = '700 13px ' + FONT;
+    ctx.fillStyle = '#ffd166';
+    ctx.textAlign = 'right';
+    ctx.fillText('86', CARD_W - PAD, baseY);
+    var gw = ctx.measureText('86').width;
+    goldDot(CARD_W - PAD - gw - 9, midY);
+    ctx.restore();
+  }
+
+  var titles = ['① 乘号（最省宽度、不会"画得不像"）', '② 小怪头（打了几只怪，一眼就懂）',
+                '③ 斜剑 45°（竖剑在 12px 下像棍子）', '④ 用文字「击杀」（最直白、占宽最多）'];
+  ctx.font = '600 13px ' + FONT;
+  for (var i = 0; i < 4; i++) {
+    var y = 26 + i * 62;
+    ctx.fillStyle = '#cfe9a8'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(titles[i], 20, y);
+    drawRow(y + 6, i + 1, 1);
+  }
+  /* 末尾：四个方案的放大对照（3x），只看"击杀"那一段 */
+  var zy = 26 + 4 * 62 + 14;
+  ctx.fillStyle = '#8f9aa3';
+  ctx.fillText('放大 3x（只看「Lv 2」到「击杀数」这一段）', 20, zy);
+  for (var j = 0; j < 4; j++) {
+    var bx = 20 + j * 198;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(bx, zy + 6, 190, 74); ctx.clip();
+    drawRow(zy + 12, j + 1, 3);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1;
+    ctx.strokeRect(bx + 0.5, zy + 6.5, 190, 73);
+  }
+  document.title = 'READY ' + out.width + 'x' + out.height;
+})();
+</script>
+</body>
+</html>

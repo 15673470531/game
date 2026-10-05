@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>挥刀充能环 · 已实装（只在收刃期）</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  挥刀充能环**实装后**的成图（2026-10 用户口径，六版）：
+     ① 把饰品光环那个位置改造成充能环、饰品光环删掉、涨满的时候闪
+     ② 「从 6 点开始吧」+「不要做的那么明显的转圈，做成之前那种饰品一样，有一个小点点在脚下转」
+     ③ 「参考之前的饰品光环…一条浅色透明的实圈，还有那个点点也是一个小小的」
+     ④ 「不够明显，小点经过的圈可以直接变成小点的颜色吗?」→ 圈自己当进度条
+     ⑤ 「换一个不是很明显的颜色吧，现在这个纯白太白了，透明一点吧」→ alpha 0.55
+     ⑥ 「转的时候这个圈不显示吧，只有收刃期间才进行转圈」← 环只在**收刃期**出现
+  这一版画的**就是 renderer.drawPlayer 现在真正画的东西**，进度用的是 P.orbT / P.orbTotal。
+
+  ⚠️ 时长**按武器变**（不是固定的 0.90s）：环的时长 = 那一把武器的收刃时长，
+     而武器在基础值(2.20/0.90)上还各乘了倍率。页脚那两行是**现场算出来的真值**。
+
+  七格：
+    ① 收刃 12%　② 收刃 50%　③ 收刃 88%（快填满）　④ 填满 → 闪光
+    ⑤ 转动期（对照：脚下什么都不画）　⑥ 中毒同屏　⑦ 有饰品（对照）
+
+  用法：bash tools/shot-boss.sh attackcd     产出 docs/attack-ring.png
+-->
+<canvas id="out"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+    var G = window.__GAME__;
+    if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+    var FW = 812, FH = 375;
+    var ZOOM0 = (G.Config.camera && G.Config.camera.zoom) || 1;
+    var RING = G.Config.feel.attackRing;
+    var OP = null;
+    var DEPS = { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save };
+
+    function newGame() {
+      var g = new G.Game(G.Config, DEPS);
+      g.setViewport(FW, FH);
+      g.updateSpawns = function () {}; g.spawnFoe = function () {};
+      return g;
+    }
+    function mkFoe(g, type, dx, dy) {
+      var f = g.Entities.makeFoe(G.Config, type, g.player.x + dx, g.player.y + dy, 1, 1, null);
+      g.world.collide(f); g.foes.push(f);
+    }
+    /** 摆成"收刃期走了 frac"（环只在收刃期画，分母就是收刃时长） */
+    function setRest(P, frac) {
+      P.orbOn = false;
+      P.orbTotal = OP.rest;
+      P.orbT = OP.rest * (1 - Math.max(0, Math.min(1, frac)));
+      P.orbChargeFlash = 0;
+    }
+
+    function mkScene(st) {
+      var g = newGame();
+      g.foes = []; g.projectiles = []; g.hazards = []; g.pickups = [];
+      g.state = 'play'; g.wave = 1; g.bossAlive = 0;
+      g.player.x = G.Config.map.w / 2; g.player.y = G.Config.map.h / 2;
+      g.player.kills = 37; g.player.gold = 86;
+      g.player.hp = g.player.stats.maxhp * 0.72;
+      g.player.xp = g.player.xpNext * 0.5;
+      mkFoe(g, 'slime', 128, -34); mkFoe(g, 'tank', -152, 26); mkFoe(g, 'charger', 54, 96);
+      OP = g.orbitParams();
+      var P = g.player;
+      if (st.spin) {                                   // 转动期对照：脚下什么都不画
+        P.orbOn = true; P.orbTotal = OP.spin; P.orbT = OP.spin * (1 - st.spin); P.orbChargeFlash = 0;
+      } else {
+        setRest(P, st.frac === undefined ? 0.5 : st.frac);
+        if (st.flash) P.orbChargeFlash = RING.flash * st.flash;
+      }
+      if (st.slow) { P.slowT = 1.5; P.slowMul = 0.55; }
+      if (st.trinket) {
+        var rt = G.Config.items.rarities[3];
+        P.equip.trinket = { id: 'pv-t', slot: 'trinket', kind: 'trinket', name: '护符',
+                            rarity: rt.id, rarityName: rt.name, color: rt.color, affixes: [] };
+      }
+      g.updateCamera();
+      return g;
+    }
+    function render(g) {
+      var cv = document.createElement('canvas'); cv.width = FW; cv.height = FH;
+      var R = new G.Renderer(cv.getContext('2d'), {
+        cfg: G.Config,
+        createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+      });
+      R.resize(FW, FH);
+      R.frameState = 'play';                                        // 实装后环只在 play 画（见 renderer）
+      R.draw(g, 1.0);
+      return cv;
+    }
+
+    var rows = [
+      { t: '① 收刃 12% —— 颜色段刚离开 6 点，点在最前端', st: { frac: 0.12 } },
+      { t: '② 收刃 50% —— 颜色段涨到 12 点附近（点这时躲在身体背后）', st: { frac: 0.50 } },
+      { t: '③ 收刃 88% —— 颜色段快到 6 点了 = 准备挥刀', st: { frac: 0.88 } },
+      { t: '④ 填满 → 闪光：点回 6 点炸一下（0.12s），然后**整个环消失**（起转开始）', st: { frac: 1, flash: 0.5 } },
+      { t: '⑤ 转动期（对照）—— 脚下**什么都不画**（"转的时候这个圈不显示"）', st: { spin: 0.4 } },
+      { t: '⑥ 中毒 + 充能环同屏 —— 毒绿圈在里、充能环在外，互不遮', st: { frac: 0.6, slow: true } },
+      { t: '⑦ 有饰品（对照）—— 饰品光环已删，脚下不因为饰品多任何东西', st: { frac: 0.5, trinket: true } }
+    ];
+
+    var pad = 12, titleH = 26, gapY = 14, FX = 12, CX = FX + FW + 16;
+    var CROPW = 300, rowH = titleH + FH + gapY;
+    var out = document.getElementById('out');
+    /* 高度 = 7 行画面 + 一条对照（标题14+24+138+标签22）+ 页脚 4 行 */
+    var FOOT = 4 * 18 + 12;
+    var outW = CX + CROPW + pad, outH = pad + rows.length * rowH + 6 + 198 + FOOT;
+    out.width = outW; out.height = outH;
+    var ctx = out.getContext('2d');
+    var FONT = '"PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = '#0d0f12'; ctx.fillRect(0, 0, outW, outH);
+
+    rows.forEach(function (row, i) {
+      var y = pad + i * rowH;
+      var g = mkScene(row.st), P = g.player;
+      var scene = render(g);
+      var psx = (P.x - g.cam.x) * ZOOM0, psy = (P.y - g.cam.y) * ZOOM0;
+
+      ctx.fillStyle = '#cfe9a8';
+      ctx.font = '600 13px ' + FONT; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(row.t, FX, y + 14);
+      ctx.drawImage(scene, FX, y + titleH);
+      ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1;
+      ctx.strokeRect(FX + 0.5, y + titleH + 0.5, FW - 1, FH - 1);
+
+      /* 脚下 2x 放大：裁 (psx±60, psy-40..psy+32)，正好含影子 + 环 + 一小截腿 */
+      var cw = 120, chh = 72, z = 2;
+      ctx.save();
+      ctx.beginPath(); ctx.rect(CX, y + titleH + 4, cw * z, chh * z); ctx.clip();
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(out, FX + psx - cw / 2, y + titleH + psy - 40, cw, chh, CX, y + titleH + 4, cw * z, chh * z);
+      ctx.restore();
+      ctx.strokeStyle = 'rgba(255,255,255,.18)';
+      ctx.strokeRect(CX + 0.5, y + titleH + 4.5, cw * z - 1, chh * z - 1);
+      ctx.fillStyle = '#8f9aa3'; ctx.font = '11px ' + FONT;
+      ctx.fillText('脚下 2x', CX, y + titleH - 1);
+    });
+
+    /* ---------- 扫过段透明度对照 ---------- */
+    var RING0 = JSON.parse(JSON.stringify(RING));
+    var cw2 = 70, ch2 = 46, z2 = 3;
+    var stripH = 14 + 24 + ch2 * z2 + 22;
+    var stripY0 = pad + rows.length * rowH + 6;
+    (function () {
+      ctx.fillStyle = '#cfe9a8';
+      ctx.font = '600 13px ' + FONT; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText('扫过段的透明度 3 档（收刃 85%，同色）—— 挑一个编号', FX, stripY0 + 14);
+      [{ label: '1 更淡（扫过 0.40）', patch: { sweepAlpha: 0.40 } },
+       { label: '2 当前（扫过 0.55）', patch: { sweepAlpha: 0.55 } },
+       { label: '3 更明显（扫过 0.75）', patch: { sweepAlpha: 0.75 } }].forEach(function (o, i) {
+        Object.keys(o.patch).forEach(function (k) { G.Config.feel.attackRing[k] = o.patch[k]; });
+        var gg = mkScene({ frac: 0.85 }), PP = gg.player;
+        var sc = render(gg);
+        var sx = (PP.x - gg.cam.x) * ZOOM0, sy = (PP.y - gg.cam.y) * ZOOM0;
+        var dx2 = FX + i * (cw2 * z2 + 20), dy2 = stripY0 + 24;
+        ctx.save(); ctx.beginPath(); ctx.rect(dx2, dy2, cw2 * z2, ch2 * z2); ctx.clip();
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(sc, sx - cw2 / 2, sy - 26, cw2, ch2, dx2, dy2, cw2 * z2, ch2 * z2);
+        ctx.restore();
+        ctx.strokeStyle = 'rgba(255,255,255,.18)'; ctx.lineWidth = 1;
+        ctx.strokeRect(dx2 + 0.5, dy2 + 0.5, cw2 * z2 - 1, ch2 * z2 - 1);
+        ctx.fillStyle = '#9fb0bb'; ctx.font = '12px ' + FONT;
+        ctx.fillText(o.label, dx2, dy2 + ch2 * z2 + 16);
+        Object.keys(RING0).forEach(function (k) { G.Config.feel.attackRing[k] = RING0[k]; });
+      });
+    })();
+
+    /* ---------- 页脚：把"每把武器的真实时长"现场算出来（环的时长 = 那把武器的收刃时长） ---------- */
+    var restLine = [], spinLine = [];
+    Object.keys(G.Config.weapons).forEach(function (kind) {
+      var w = G.Config.weapons[kind];
+      var g2 = newGame();
+      g2.player.equip.weapon = { id: 't-' + kind, slot: 'weapon', slotName: '武器', kind: kind,
+                                 name: w.name, rarity: 1, rarityName: '普通', color: '#fff', affixes: [], score: 0 };
+      g2.Prog.recompute(g2.player, G.Config);
+      var o = g2.orbitParams();
+      restLine.push(w.name + ' ' + o.rest.toFixed(2) + 's');
+      spinLine.push(w.name + ' ' + o.spin.toFixed(2) + 's');
+    });
+    var fy = pad + rows.length * rowH + 6 + stripH + 4;
+    ctx.font = '12px ' + FONT;
+    ctx.fillStyle = '#9fb0bb';
+    ctx.fillText('环的时长（= 那把武器的**收刃**时长，也是它转满一圈的时间）：' + restLine.join('　·　'), FX, fy + 14);
+    ctx.fillText('转动段（这段时间脚下**什么都不画**）：' + spinLine.join('　·　'), FX, fy + 32);
+    ctx.fillStyle = '#6f7a83';
+    ctx.fillText('环：淡底整圈 alpha ' + RING.ringAlpha + ' + 已扫过的一段 alpha ' + RING.sweepAlpha
+      + '（同一条圈、同线宽 2.6，只换透明度）；点 r=' + RING.dotR + ' 走在外扩 ' + (RING.dotOut || 4)
+      + 'px 的路径上，起点 6 点、按进度顺时针。⚠️ 时长**按武器变**，不是固定的 0.90s。', FX, fy + 50);
+    ctx.fillText('⚠️ 画面里没有摇杆/冲刺键（平台层画的，不在共享渲染器里）；饰品光环（含 3 颗绕转小点）已按用户口径删除。', FX, fy + 68);
+
+    document.title = 'READY ' + outW + 'x' + outH;
+  } catch (e) { document.title = 'ERR: ' + (e && e.message); }
+})();
+</script>
+</body>
+</html>

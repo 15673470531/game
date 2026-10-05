@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>荒原巨蝎 · 机制预览</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  荒原巨蝎（第 1 关 Boss）机制预览：四格 = 四个距离段 / 裂壳。
+
+  用途：改完 Boss 的招、预警样式、裂壳表现之后，不开微信开发者工具先自己看一眼
+  ——「预警长什么样、玩家能不能读懂」这种问题断言抓不到，只能看图。
+
+  ⚠️ 画的是**真渲染器 + 真 game 对象**（和 tools/verify-*.js 同一套核心层），
+     不是手绘示意图。改了 core/ 或 render/ 之后重跑一次就是最新样子。
+
+  用法：bash tools/shot-boss.sh        产出 docs/boss-warden.png
+-->
+<canvas id="out" width="1640" height="828"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var W = 812, H = 375, CAP = 24;
+
+  function mkScene() {
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(W, H);
+    g.updateSpawns = function () {};            // 预览只留 Boss 这一件事
+    g.spawnFoe = function () {};
+    g.foes = []; g.projectiles = []; g.hazards = []; g.pickups = [];
+    g.state = 'play';
+    g.wave = 3;
+    g.stageBossPending = true;
+    g.trial.finished = false;
+    g.updateCamera();
+    return g;
+  }
+  function addBoss(g, dist) {
+    var P = g.player;
+    var b = g.Entities.makeBoss(G.Config, P.x + dist, P.y, 1, 'warden', 1);
+    g.world.collide(b);
+    b.face = Math.atan2(P.y - b.y, P.x - b.x);   // 蝎子的朝向：头朝玩家
+    g.foes.push(b);
+    g.bossAlive = 1;
+    return b;
+  }
+  function render(g) {
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var r = new G.Renderer(cv.getContext('2d'), {
+      cfg: G.Config,
+      createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+    });
+    r.resize(W, H);
+    r.draw(g, 1.0);
+    return cv;
+  }
+
+  var panels = [];
+  var P, b, g;
+
+  // ① 远距：尾针锁定中（尾针发亮 + 地上一条毒绿细线，亮线往回收）
+  g = mkScene(); b = addBoss(g, 340); P = g.player;
+  b.sting = 0.55; b.stingTotal = G.Config.bossTypes.warden.sting.windup;
+  b.chargeDir = Math.atan2(P.y - b.y, P.x - b.x);
+  b.chargeRange = G.Config.bossTypes.warden.sting.range;
+  panels.push({ title: '① 远距（>330px）· 尾针锁定：细线 = 只能横向挪，后退躲不掉', cv: render(g) });
+
+  // ② 近身：双钳夹击预警（身前扇形，内圈往回收）
+  g = mkScene(); b = addBoss(g, 118); P = g.player;
+  b.claw = 0.35; b.clawTotal = G.Config.bossTypes.warden.claw.telegraph;
+  b.clawDir = Math.atan2(P.y - b.y, P.x - b.x);
+  b.clawRange = G.Config.bossTypes.warden.claw.range;
+  b.clawArc = G.Config.bossTypes.warden.claw.arc;
+  panels.push({ title: '② 近身（<140px）· 双钳夹击：扇形落地预警，夹中会被推开', cv: render(g) });
+
+  // ③ 中距：震荡波（圈落在玩家脚下）
+  g = mkScene(); b = addBoss(g, 240); P = g.player;
+  b.cast = 'slam';
+  b.castT = 0.55; b.castTotal = G.Config.bossTypes.warden.slam.telegraph;
+  b.castRadius = G.Config.bossTypes.warden.slam.radius;
+  b.castX = P.x; b.castY = P.y;
+  panels.push({ title: '③ 中距（140~330px）· 震荡波：圈落在你脚下，离开那个圈', cv: render(g) });
+
+  // ④ 半血裂壳：体色转红 + 甲片裂缝 + 尾针三连 + 玩家中毒
+  g = mkScene(); b = addBoss(g, 300); P = g.player;
+  b.phase2 = true; b.hp = b.maxhp * 0.35;
+  var dir = Math.atan2(P.y - b.y, P.x - b.x), spread = G.Config.bossTypes.warden.sting.spread;
+  for (var i = -1; i <= 1; i++) {              // 针放在"已经飞在半路"的位置，别贴到画面外
+    var p = g.Entities.makeProjectile(b.x - 150, b.y + i * 32, dir + i * spread,
+      G.Config.bossTypes.warden.sting.speed, 17, G.Config.bossTypes.warden.sting.width, '#c8e06a', 'foe');
+    p.spike = true;
+    g.projectiles.push(p);
+  }
+  P.slowT = 1.2; P.slowMul = G.Config.bossTypes.warden.sting.slowMul;
+  P.hp = P.stats.maxhp * 0.62;
+  panels.push({ title: '④ 半血裂壳：体色转红 + 甲片裂缝 + 尾针三连（命中中毒减速）', cv: render(g) });
+
+  // 拼成 2×2
+  var out = document.getElementById('out').getContext('2d');
+  out.fillStyle = '#0d0f12'; out.fillRect(0, 0, 1640, 828);
+  out.font = '600 13px "PingFang SC","Microsoft YaHei",monospace';
+  for (var k = 0; k < panels.length; k++) {
+    var col = k % 2, row = Math.floor(k / 2);
+    var x = col * (W + 12) + 4, y = row * (H + CAP + 10) + CAP + 6;
+    out.fillStyle = '#cfe9a8';
+    out.fillText(panels[k].title, x, y - 7);
+    out.drawImage(panels[k].cv, x, y);
+  }
+  document.title = 'READY';
+  } catch (e) {
+    /* 预览页出错时必须**看得见**：否则无头截图只会得到一张纯色图，
+       看起来像"版式就是空白的"，查半天。title 会被 --dump-dom 抓出来。 */
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

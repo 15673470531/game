@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>一次攻击 = 转一圈 · 连拍对比</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  「一次攻击转几圈」连拍对比（2026-10 用户："现在一次攻击会转好几圈，要不要改成一次攻击转一圈呢"）。
+
+  怎么看：每一行 = 一把武器的一个**攻击窗口**（起转 → 收刃）平均切成 8 格，
+  每格是该时刻刀刃的位置。行与行之间只差"窗口时长"，所以：
+    · 旧的那行：同样 8 格里刀刃绕了 2.4 圈 → 看着就是"一圈一圈反复绕"
+    · 新的那行：8 格正好走完一圈 → 一刀就是一整圈
+  ⚠️ 两行的**每格代表的真实时间不一样**（旧行 2.42s/8 = 0.30s 一格；新行 1.00s/8 = 0.125s 一格）——
+     这正是"窗口变短"的代价，别拿它当"变快"。
+  ⚠️ 这一页是**只画不动**：直接摆刀刃角度（不跑 update），所以每格都没有伤害痕迹 ——
+     要比较的是"刀走到哪儿"，不是伤害。伤害/命中次数看数字：旧长剑一只怪一个窗口吃 2.4 刀，新的是 1 刀。
+
+  用法：bash tools/shot-boss.sh onespin      产出 docs/one-spin-per-attack.png
+-->
+<canvas id="out" width="812" height="1060"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var W = 812, H = 375, CAP = 22;
+  var FRAMES = 8, CELL = 98, GAP = 2, CROP = 250;      // 每格裁 250×250 世界区域（长枪半径 125 刚好放得下）
+
+  function mkScene(kind) {
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(W, H);
+    g.updateSpawns = function () {};                    // 预览不要杂兵
+    g.spawnFoe = function () {};
+    g.foes = []; g.projectiles = []; g.hazards = []; g.pickups = [];
+    g.state = 'play';
+    var it = G.Progression.makeDefaultWeapon(G.Config);
+    it.id = 'pv-' + kind; it.kind = kind; it.name = G.Config.weapons[kind].name;
+    g.player.equip.weapon = it;
+    g.player.bag = [it];
+    g.Prog.recompute(g.player, G.Config);
+    /* 一圈薄血怪当参照物：能看出刀刃在哪个位置扫过谁（数量/位置固定，两行可比） */
+    for (var i = 0; i < 6; i++) {
+      var a = i / 6 * 6.283;
+      var f = G.Entities.makeFoe(G.Config, 'tank', g.player.x + Math.cos(a) * 88, g.player.y + Math.sin(a) * 70, 1, 1);
+      f.hp = f.maxhp = 9999;                            // 别死：只当参照
+      g.world.collide(f);
+      g.foes.push(f);
+    }
+    g.updateCamera();
+    return g;
+  }
+  function render(g) {
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var r = new G.Renderer(cv.getContext('2d'), {
+      cfg: G.Config,
+      createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+    });
+    r.resize(W, H);
+    r.draw(g, 1.0);
+    return cv;
+  }
+
+  /* 一行连拍：把 kind 这把武器的窗口切成 8 格，返回 8 张裁好的小图 + 这一行的圈数 */
+  function strip(kind, spinMul) {
+    var W0 = G.Config.weapons[kind], saved = W0.orbit.spin;
+    if (spinMul !== null && spinMul !== undefined) W0.orbit.spin = spinMul;
+    var probe = mkScene(kind), op = probe.orbitParams();
+    var turns = op.omega * op.spin / (Math.PI * 2);
+    var out = [];
+    for (var k = 0; k < FRAMES; k++) {
+      var g = mkScene(kind);
+      g.player.orbOn = true;
+      g.player.orbT = op.spin * (1 - k / FRAMES);        // 这一格时窗口还剩多少
+      /* 刀刃角度：每行都从正上方起转（可比），第 k 格走过 k/8 个窗口 → 走过 turns×k/8 圈 */
+      g.player.orbAng = -Math.PI / 2 + turns * Math.PI * 2 * (k / FRAMES);
+      g.player.orbPrev = g.player.orbAng;
+      g.updateCamera();
+      var full = render(g);
+      var cell = document.createElement('canvas');
+      cell.width = CELL; cell.height = CELL;
+      var cc = cell.getContext('2d');
+      cc.imageSmoothingEnabled = true;
+      cc.drawImage(full, W / 2 - CROP / 2, H / 2 - CROP / 2, CROP, CROP, 0, 0, CELL, CELL);
+      out.push(cell);
+    }
+    W0.orbit.spin = saved;
+    return { frames: out, turns: turns, spin: op.spin };
+  }
+
+  /* 旧倍率（改动前）—— 只在预览里临时用，不写回项目文件 */
+  var OLD = { sword: 1.10, dagger: 1.00, spear: 1.00, staff: 1.50 };
+  var kinds = ['sword', 'dagger', 'spear', 'staff'];
+  var rows = [];
+  for (var i = 0; i < kinds.length; i++) {
+    var kd = kinds[i], nm = G.Config.weapons[kd].name;
+    rows.push({ cap: nm + ' · 改动前：一个窗口转 ' + '？' + ' 圈', data: strip(kd, OLD[kd]) });
+    rows.push({ cap: nm + ' · 现在：一个窗口正好 1 圈', data: strip(kd, null) });
+  }
+
+  var outCv = document.getElementById('out');
+  var rowH = CELL + 22 + 6;
+  outCv.width = W;
+  outCv.height = 26 + rows.length * rowH + 6;
+  var out = outCv.getContext('2d');
+  out.fillStyle = '#0d0f12'; out.fillRect(0, 0, outCv.width, outCv.height);
+  out.font = '600 12.5px "PingFang SC","Microsoft YaHei",monospace';
+  out.textBaseline = 'alphabetic'; out.textAlign = 'left';
+  var x0 = (W - (FRAMES * CELL + (FRAMES - 1) * GAP)) / 2;
+  for (var r = 0; r < rows.length; r++) {
+    var ry = 26 + r * rowH;
+    out.fillStyle = '#cfe9a8';
+    out.fillText(rows[r].cap.replace('？', rows[r].data.turns.toFixed(1)), 6, ry - 6);
+    out.fillStyle = '#7d848b';
+    out.fillText('窗口 ' + rows[r].data.spin.toFixed(2) + 's ÷ 8 格', W - 150, ry - 6);
+    for (var k = 0; k < FRAMES; k++) {
+      var cx = x0 + k * (CELL + GAP);
+      out.drawImage(rows[r].data.frames[k], cx, ry);
+      out.strokeStyle = 'rgba(255,255,255,.10)'; out.lineWidth = 1;
+      out.strokeRect(cx + 0.5, ry + 0.5, CELL - 1, CELL - 1);
+      out.fillStyle = 'rgba(255,255,255,.45)';
+      out.fillText(String(k + 1), cx + 4, ry + 13);
+    }
+  }
+  document.title = 'READY ' + outCv.width + 'x' + outCv.height;
+  } catch (e) {
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

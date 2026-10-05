@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>结算页 · 熟练度块（2026-10）</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  结算页「熟练度块」的对照图（2026-10 武器熟练度）。
+  五格：长剑 Lv1 打完一把（半条）→ Lv2 中段 → 满级（改说满级奖励）→ 双刀（奖励未定，不画右半句）
+        → 对照：本局 0 点（不摆一个"+0"）。
+
+  ⚠️ 画的是**真渲染器 + 真 game 对象**（Renderer.drawMasteryBlock 本身，走 drawGameOver 那条路），
+     不是手绘示意：改了 config.mastery 或 renderer.drawMasteryBlock，重跑一次就是最新样子。
+  ⚠️ 2x 放大 + 只裁熟练度那两行，方便逐字核（用户口径："改渲染必须自己放大看"）。
+  ⚠️ 这块的高度是**量出来的**：结算页文字区一共只有 132px（DEAD_TEXT_H），一点都涨不得，
+     涨了 812x375 会把下面那排按钮顶出屏幕 —— 所以这里只截那一块，看它有没有挤/压到分隔线。
+
+  用法：bash tools/shot-boss.sh mastery      产出 docs/mastery-block.png
+-->
+<canvas id="out"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+    var G = window.__GAME__;
+    if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+    var W = 812, H = 375, ZOOM = 2;
+
+    function build(st) {
+      var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+      g.setViewport(W, H);
+      var kind = st.kind || 'sword';
+      var w = G.Progression.makeDefaultWeapon(G.Config);
+      w.kind = kind; w.id = 'w-' + kind; w.name = G.Config.weapons[kind].name;
+      g.player.equip.weapon = w; g.player.bag = [w];
+      g.player.mastery = {}; g.player.masteryGainRun = {};
+      g.player.mastery[kind] = st.pts;
+      if (st.gain) g.player.masteryGainRun[kind] = st.gain;
+      g.player.gold = 86;
+      g.state = 'dead';
+      return g;
+    }
+
+    var M = G.Config.mastery.levels;
+    var states = [
+      { label: '① 长剑 Lv1 · 打完一把：150 / 300 —— 分母是**本级上限**（不是满级 900），一条就是半格', pts: 150, gain: 150 },
+      { label: '② 长剑 Lv2 中段：450 / 600 —— 下一级解锁「叠刃」', pts: 450, gain: 150 },
+      { label: '③ 长剑满级：900 / 900 —— 右半句改说**满级奖励**（那行不许空着）', pts: M[3], gain: 150 },
+      { label: '④ 双刀（奖励还没定）：只画进度条，右半句**不画** —— 不露"待开发"、也不写"敬请期待"', kind: 'dagger', pts: 400, gain: 60 },
+      { label: '⑤ 对照 · 本局 0 点：不摆一个"+0"（只画进度条）', pts: 150, gain: 0 }
+    ];
+
+    /* 裁切范围：熟练度那两行（textTop 是渲染层自己算的，跟着按钮数会变，这里读真的） */
+    var probe = build(states[0]);
+    var textTop = probe.deadRects().textTop;
+    var CROP = { x: 406 - 210, y: textTop + 100, w: 420, h: 36 };
+
+    function frame(st) {
+      var g = build(st);
+      var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      var r = new G.Renderer(cv.getContext('2d'), {
+        cfg: G.Config,
+        createCanvas: function (w2, h2) { var c = document.createElement('canvas'); c.width = w2; c.height = h2; return c; }
+      });
+      r.resize(W, H);
+      r.draw(g, 1.0);
+      return cv;
+    }
+
+    var stripH = CROP.h * ZOOM, labelH = 26, pad = 12;
+    var outW = CROP.w * ZOOM + pad * 2;
+    var outH = pad + states.length * (stripH + labelH + pad);
+    var out = document.getElementById('out');
+    out.width = outW; out.height = outH;
+    var ctx = out.getContext('2d');
+    var FONT = '"PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = '#0d0f12'; ctx.fillRect(0, 0, outW, outH);
+
+    states.forEach(function (s, i) {
+      var cv = frame(s);
+      var y = pad + i * (stripH + labelH + pad);
+      ctx.save();
+      ctx.fillStyle = '#cfe9a8';
+      ctx.font = '600 13px ' + FONT; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(s.label, pad, y + 14);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(cv, CROP.x, CROP.y, CROP.w, CROP.h, pad, y + labelH - 6, CROP.w * ZOOM, stripH);
+      ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 1;
+      ctx.strokeRect(pad + 0.5, y + labelH - 5.5, CROP.w * ZOOM - 1, stripH + 1);
+      ctx.restore();
+    });
+
+    document.title = 'READY ' + outW + 'x' + outH;
+  } catch (e) { document.title = 'ERR: ' + (e && e.message); }
+})();
+</script>
+</body>
+</html>

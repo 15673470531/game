@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>设置面板 · BGM 开关预览</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  设置面板三格（2026-10 加 BGM 那一轮）：
+    ① 设置面板 · 默认（音乐/音效/震动 三行全亮）
+    ② 设置面板 · 关掉音乐（对照：灰掉的那行是什么样）
+    ③ 暂停面板（同样多了「音乐」一行，战斗中不用回首页就能关）
+
+  ⚠️ 画布高度用 430 而不是其它预览页的 375：暂停面板加了「音乐」这行后高 378px，
+     在 375 的矮画布上会被切掉 15px（真机 780/844 高都没事，但预览里必须看得全）。
+
+  为什么要出图：面板行数从 2 变 3，**高度变了** —— 断言只能证明"有这一行"，
+  证明不了"没被挤到屏幕外/没和标题叠上"。用法：bash tools/shot-boss.sh settings
+-->
+<canvas id="out" width="812" height="1400"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var W = 812, H = 430, CAP = 26;
+
+  function mkScene() {
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(W, H);
+    g.state = 'title';
+    g.settingsOpen = false; g.infoOpen = false; g.loadoutOpen = false;
+    return g;
+  }
+  function render(g) {
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var r = new G.Renderer(cv.getContext('2d'), {
+      cfg: G.Config,
+      createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+    });
+    r.resize(W, H);
+    r.draw(g, 1.0);
+    return cv;
+  }
+
+  var panels = [];
+
+  var g1 = mkScene();
+  g1.settingsOpen = true;
+  panels.push({ title: '① 设置面板（默认）：音乐 / 音效 / 震动 三行 —— 音乐排最上面（有没有背景声是第一层）', cv: render(g1) });
+
+  var g2 = mkScene();
+  g2.settingsOpen = true;
+  g2.settings.music = false; g2.settings.vibrate = false;
+  panels.push({ title: '② 关掉音乐 + 震动：灰掉的是关闭状态（音乐关掉 → 平台层淡出并 stop，不是音量调 0 留着解码）', cv: render(g2) });
+
+  var g3 = mkScene();
+  g3.state = 'paused';
+  panels.push({ title: '③ 暂停面板：同样有「音乐」一行 —— 战斗中想关掉不用先回首页', cv: render(g3) });
+
+  var outCv = document.getElementById('out');
+  outCv.width = 812;
+  outCv.height = panels.length * (H + CAP + 10) + CAP + 6;
+  var out = outCv.getContext('2d');
+  out.fillStyle = '#0d0f12'; out.fillRect(0, 0, outCv.width, outCv.height);
+  out.font = '600 13px "PingFang SC","Microsoft YaHei",monospace';
+  for (var k = 0; k < panels.length; k++) {
+    var y = k * (H + CAP + 10) + CAP + 6;
+    out.fillStyle = '#cfe9a8';
+    out.fillText(panels[k].title, 4, y - 7);
+    out.drawImage(panels[k].cv, 0, y);
+  }
+  document.title = 'READY ' + outCv.width + 'x' + outCv.height;
+  } catch (e) {
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>武器成长阶梯 · 一局能从多小长到多大</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  「一局打完武器天差地别」的成长阶梯图（2026-10 用户口径）。
+
+  每一格 = 同一把长剑、同一个场景，只把**尺寸成长倍率**按标注设上去（走的是真实的
+  player.base.attackRange + recompute 路径，不是手画一把大剑）：
+    ×1（开局） / ×2 / ×3.5 / ×5（≈ 一局刻意堆长度的上限）
+  格子里还给了：角色（参照物）、四周的怪（看"够得着多远"）、左上角 HUD（看刀相对角色的比例）。
+
+  用法：bash tools/shot-boss.sh growth      产出 docs/weapon-growth.png
+-->
+<canvas id="out" width="812" height="460"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var W = 812, H = 375, CAP = 24;
+
+  function mkScene(mul, blades, burst) {
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(W, H);
+    g.updateSpawns = function () {};
+    g.spawnFoe = function () {};
+    g.foes = []; g.projectiles = []; g.hazards = []; g.pickups = [];
+    g.state = 'play';
+    var it = G.Progression.makeDefaultWeapon(G.Config);
+    it.id = 'pv-sword'; it.kind = 'sword'; it.name = G.Config.weapons.sword.name;
+    g.player.equip.weapon = it; g.player.bag = [it];
+    /* 尺寸成长：改的就是玩家真实的那个字段（长刃/巨刃 改的也是它），再走一次 recompute */
+    g.player.base.attackRange = G.Config.player.base.attackRange * mul;
+    /* 刃数：旋刃卡改的也是这个字段（orbitBlades = 1 + 卡数） */
+    g.player.base.orbitBlades = blades;
+    g.Prog.recompute(g.player, G.Config);
+    /* 开天：走真实的 burst 路径（orbitParams 里把半径乘上去，渲染层读同一个数） */
+    if (burst) g.player.burst = { id: 'skyCut', name: '开天', left: 3, active: true, radiusMul: burst };
+    /* 四周摆一圈怪当参照：能看出"够得着多远" */
+    for (var i = 0; i < 10; i++) {
+      var a = i / 10 * 6.283;
+      var f = G.Entities.makeFoe(G.Config, 'slime', g.player.x + Math.cos(a) * (120 + (i % 3) * 110), g.player.y + Math.sin(a) * (95 + (i % 3) * 85), 1, 1);
+      f.hp = f.maxhp = 9999;
+      g.world.collide(f); g.foes.push(f);
+    }
+    g.player.orbOn = true;
+    g.player.orbAng = -Math.PI / 2;                    // 每格都从正上方起转，刀的位置一致好对比
+    g.player.orbT = 99;                                 // 停在"转动中"（别收刃，否则看不到刀）
+    g.updateCamera();
+    return g;
+  }
+  function render(g) {
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var r = new G.Renderer(cv.getContext('2d'), {
+      cfg: G.Config,
+      createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+    });
+    r.resize(W, H);
+    r.draw(g, 1.0);
+    return cv;
+  }
+
+  /* ⚠️ 标注按**实测**写：一局 8 次升级、刻意堆长度，中位 ×2.05（4 张尺寸卡）、
+     运气好 ×3.57（7 张）；×5 要 11 张，一局够不到 —— 那一格是"上限示意"，别当成能达成的目标。
+     下半部分：**刃数**（旋刃卡，2026-10 用户："旋刃也不要封顶吧"）1 / 3 / 5 / 8 把同场对比。
+     刃数不封顶的代价写在 game.orbitParams 那段注释里（DPS 线性 +15%/把，命中事件线性涨）。 */
+  var specs = [
+    { mul: 1, blades: 1, note: '开局' },
+    { mul: 2, blades: 1, note: '一局中位（约 4 张尺寸卡）' },
+    { mul: 3.5, blades: 1, note: '运气好（约 7 张）' },
+    { mul: 5, blades: 1, note: '一局拿不到（要 11 张）· 上限示意' },
+    { mul: 1, blades: 3, note: '旋刃 ×3' },
+    { mul: 1, blades: 5, note: '旋刃 ×5' },
+    { mul: 1, blades: 8, note: '旋刃 ×8（不封顶）' },
+    { mul: 1, blades: 11, note: '旋刃 ×11（极端堆法，看看密到什么程度）' },
+    /* 「开天」是**乘在当前半径上**的（×5 / 金 ×8），所以成长越高，开天越夸张 —— 这三格看"会不会过头" */
+    { mul: 1, blades: 1, burst: 5, note: '开局就开天：70 → 350px（0.8× 屏幕半宽）' },
+    { mul: 2, blades: 1, burst: 5, note: '成长 ×2 后开天：140 → 700px（1.6× 半宽）' },
+    { mul: 3.6, blades: 1, burst: 5, note: '堆满 ×3.6 后开天：252 → 1260px（2.8× 半宽，整屏一条线）' }
+  ];
+  var cells = [];
+  for (var i = 0; i < specs.length; i++) {
+    var g = mkScene(specs[i].mul, specs[i].blades, specs[i].burst);
+    var op = g.orbitParams();
+    cells.push({ mul: specs[i].mul, blades: specs[i].blades, burst: specs[i].burst, note: specs[i].note, cv: render(g),
+      radius: op.radius, rest: op.rest, dmg: op.dmg, bladesDrawn: op.blades,
+      turns: op.omega * op.spin / (Math.PI * 2) });
+  }
+
+  var outCv = document.getElementById('out');
+  var cw = W / 2, ch = H / 2;                          // 整屏缩到 1/2，两格一行
+  outCv.width = W; outCv.height = 26 + Math.ceil(specs.length / 2) * (ch + 46) + 8;
+  var out = outCv.getContext('2d');
+  out.fillStyle = '#0d0f12'; out.fillRect(0, 0, outCv.width, outCv.height);
+  out.font = '600 13px "PingFang SC","Microsoft YaHei",monospace';
+  out.textBaseline = 'alphabetic'; out.textAlign = 'left';
+  out.font = '600 12.5px "PingFang SC","Microsoft YaHei",monospace';
+  for (var k = 0; k < cells.length; k++) {
+    var col = k % 2, row = Math.floor(k / 2);
+    var x = col * cw, y = 26 + row * (ch + 46);
+    /* 说明分两行写：一行塞不下（会长到压在隔壁格子上） */
+    out.fillStyle = '#cfe9a8';
+    out.fillText('尺寸 ×' + cells[k].mul + '　刃 ' + cells[k].bladesDrawn + ' 把'
+      + (cells[k].burst ? '　开天 ×' + cells[k].burst : '') + '　│　' + cells[k].note, x + 4, y + 10);
+    out.fillStyle = '#8f9aa3';
+    out.font = '600 11.5px "PingFang SC","Microsoft YaHei",monospace';
+    out.fillText('半径 ' + Math.round(cells[k].radius) + 'px　收刃 ' + cells[k].rest.toFixed(2) + 's　单刃 '
+      + Math.round(cells[k].dmg) + '　圈数 ' + cells[k].turns.toFixed(2), x + 4, y + 26);
+    out.font = '600 12.5px "PingFang SC","Microsoft YaHei",monospace';
+    out.drawImage(cells[k].cv, 0, 0, W, H, x, y + 34, cw, ch);
+    out.strokeStyle = 'rgba(255,255,255,.12)'; out.lineWidth = 1;
+    out.strokeRect(x + 0.5, y + 34.5, cw - 1, ch - 1);
+  }
+  document.title = 'READY ' + outCv.width + 'x' + outCv.height;
+  } catch (e) {
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

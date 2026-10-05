@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Lv 行 · 击杀图标候选 + 中线对齐验证</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  「击杀」图标候选（2026-10 用户："击杀用图标吧"，并且指出金币点没在同一行）。
+
+  ⚠️ 上一版错位 5px 的原因：数字按 alphabetic 基线画（基线在 y），图标却按"基线−4.5"估的视觉中线 ——
+     两套规则各自估，必然错。这一版**数字和图标都用 textBaseline='middle'** 画在同一个 y 上：
+     结构上不可能再错位（渲染层也照这个改）。
+  ⚠️ 候选图标都按 12~14px 高画，因为数字只有 9px 高 —— 图标比数字略大才立得住。
+
+  用法：bash tools/shot-boss.sh icon      产出 docs/kill-icon-options.png
+-->
+<canvas id="out" width="812" height="360"></canvas>
+<script>
+(function () {
+  var out = document.getElementById('out');
+  out.width = 812; out.height = 360;
+  var ctx = out.getContext('2d');
+  var FONT = '"PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.fillStyle = '#0d0f12'; ctx.fillRect(0, 0, 812, 360);
+  ctx.textBaseline = 'alphabetic'; ctx.textAlign = 'left';
+
+  var COL = '#d8dee6';
+
+  /* 六个候选图标：都画在 (x,y) = 图标中心，尺寸约 12~14px */
+  var ICONS = {
+    /* ① 小怪头：圆身 + 两只眼 + 两只小角（比"一坨灰疙瘩"多点特征） */
+    1: function (x, y) {
+      ctx.fillStyle = COL;
+      ctx.beginPath(); ctx.ellipse(x, y + 0.4, 6.0, 5.2, 0, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x - 4.4, y - 3.6); ctx.lineTo(x - 2.6, y - 7.0); ctx.lineTo(x - 1.6, y - 4.4); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x + 4.4, y - 3.6); ctx.lineTo(x + 2.6, y - 7.0); ctx.lineTo(x + 1.6, y - 4.4); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#11161b';
+      ctx.beginPath(); ctx.arc(x - 2.2, y - 0.4, 1.3, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + 2.2, y - 0.4, 1.3, 0, 7); ctx.fill();
+    },
+    /* ② 双刀交叉：两条 45° 刃 + 四个小护手（"战斗/击杀"的通用记号） */
+    2: function (x, y) {
+      ctx.strokeStyle = COL; ctx.lineWidth = 2.2; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x - 5.2, y - 5.2); ctx.lineTo(x + 4.2, y + 4.2); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + 5.2, y - 5.2); ctx.lineTo(x - 4.2, y + 4.2); ctx.stroke();
+      ctx.lineWidth = 1.8;
+      ctx.beginPath(); ctx.moveTo(x - 6.4, y - 3.0); ctx.lineTo(x - 3.0, y - 6.4); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + 6.4, y - 3.0); ctx.lineTo(x + 3.0, y - 6.4); ctx.stroke();
+    },
+    /* ③ 骷髅头：圆 + 两眼 + 三颗牙 */
+    3: function (x, y) {
+      ctx.fillStyle = COL;
+      ctx.beginPath(); ctx.ellipse(x, y - 0.6, 5.4, 5.0, 0, 0, 7); ctx.fill();
+      ctx.fillRect(x - 3.2, y + 3.0, 6.4, 2.6);
+      ctx.fillStyle = '#11161b';
+      ctx.beginPath(); ctx.arc(x - 2.2, y - 1.4, 1.5, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + 2.2, y - 1.4, 1.5, 0, 7); ctx.fill();
+      ctx.fillRect(x - 0.5, y + 3.4, 1.0, 2.0);
+    },
+    /* ④ 横放长剑：刃（右侧收尖）+ 护手 + 柄（横着比竖着更像"剑"，12px 下也读得出） */
+    4: function (x, y) {
+      ctx.fillStyle = COL;
+      ctx.beginPath(); ctx.moveTo(x - 4.4, y - 1.8); ctx.lineTo(x + 4.6, y - 1.8);
+      ctx.lineTo(x + 7.2, y); ctx.lineTo(x + 4.6, y + 1.8); ctx.lineTo(x - 4.4, y + 1.8); ctx.closePath(); ctx.fill();
+      ctx.fillRect(x - 5.4, y - 3.6, 1.8, 7.2);          // 护手
+      ctx.fillRect(x - 8.4, y - 1.1, 3.2, 2.2);          // 柄
+    },
+    /* ⑤ 竖剑（和装备栏同一个造型，放大到 15px 高、线加粗） */
+    5: function (x, y) {
+      ctx.strokeStyle = COL; ctx.fillStyle = COL; ctx.lineWidth = 3.0; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x, y + 5.4); ctx.lineTo(x, y - 4.4); ctx.stroke();
+      ctx.lineWidth = 2.4;
+      ctx.beginPath(); ctx.moveTo(x - 3.6, y + 3.6); ctx.lineTo(x + 3.6, y + 3.6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x, y - 7.4); ctx.lineTo(x + 2.0, y - 4.0); ctx.lineTo(x, y - 1.6); ctx.lineTo(x - 2.0, y - 4.0);
+      ctx.closePath(); ctx.fill();
+    },
+    /* ⑥ 弯刀：一条弧刃 + 柄（"砍"的感觉，弧线在小尺寸下比直线更像刀） */
+    6: function (x, y) {
+      ctx.strokeStyle = COL; ctx.lineWidth = 2.8; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.arc(x + 1.0, y + 2.4, 6.6, -2.5, -0.4); ctx.stroke();
+      ctx.lineWidth = 2.2;
+      ctx.beginPath(); ctx.moveTo(x - 4.6, y + 5.0); ctx.lineTo(x - 2.4, y + 3.2); ctx.stroke();
+    }
+  };
+
+  /* 一行卡片：Lv 2 + [图标] 128 + ●86 —— 数字和图标都用 middle 基线画在同一个 y */
+  function drawRow(top, icon) {
+    var PAD = 10, CARD_W = 156, CARD_H = 30, X0 = 20;
+    var midY = top + CARD_H / 2;
+    ctx.fillStyle = 'rgba(6,10,14,.94)';
+    ctx.fillRect(X0, top, CARD_W, CARD_H);
+    ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1.5;
+    ctx.strokeRect(X0 + 0.5, top + 0.5, CARD_W - 1, CARD_H - 1);
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.font = '800 14px ' + FONT;
+    ctx.fillStyle = '#fff';
+    ctx.fillText('Lv 2', X0 + PAD, midY);
+    var lvW = ctx.measureText('Lv 2').width;
+    var kx = X0 + PAD + lvW + 10;
+    if (icon) ICONS[icon](kx + 7, midY);
+    ctx.font = '700 13px ' + FONT;
+    ctx.fillStyle = '#e8edf2';
+    ctx.fillText('128', kx + 18, midY);
+    /* 金币：圆点和数字都按 middle 画在 midY 上 */
+    ctx.fillStyle = '#ffd166';
+    ctx.textAlign = 'right';
+    ctx.fillText('86', X0 + CARD_W - PAD, midY);
+    var gw = ctx.measureText('86').width;
+    ctx.beginPath(); ctx.arc(X0 + CARD_W - PAD - gw - 9, midY, 4.4, 0, 7); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,.55)';
+    ctx.beginPath(); ctx.arc(X0 + CARD_W - PAD - gw - 10.5, midY - 1.6, 1.4, 0, 7); ctx.fill();
+    ctx.textBaseline = 'alphabetic';
+  }
+
+  var names = { 1: '① 小怪头', 2: '② 双刀交叉', 3: '③ 骷髅头', 4: '④ 横放长剑', 5: '⑤ 竖剑（装备栏同款）', 6: '⑥ 弯刀' };
+  ctx.font = '600 13px ' + FONT;
+  for (var i = 1; i <= 6; i++) {
+    var col = (i - 1) % 3, row = Math.floor((i - 1) / 3);
+    var x = 20 + col * 264, y = 24 + row * 66;
+    ctx.fillStyle = '#cfe9a8'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(names[i], x, y - 6);
+    ctx.save();
+    ctx.translate(x - 20, y - 24);
+    drawRow(24, i);
+    ctx.restore();
+  }
+
+  /* 末尾：3x 放大（①~⑥），检查图标在放大后是什么形状 */
+  var zy = 24 + 2 * 66 + 26;
+  ctx.fillStyle = '#8f9aa3'; ctx.fillText('放大 3x', 20, zy);
+  for (var j = 1; j <= 6; j++) {
+    var bx = 20 + (j - 1) * 132;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(bx, zy + 6, 128, 84); ctx.clip();
+    ctx.translate(bx - 20, zy + 6 - 24);
+    ctx.scale(1.6, 1.6);
+    drawRow(24, j);
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.lineWidth = 1;
+    ctx.strokeRect(bx + 0.5, zy + 6.5, 127, 83);
+  }
+  document.title = 'READY ' + out.width + 'x' + out.height;
+})();
+</script>
+</body>
+</html>

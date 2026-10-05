@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>首页 · 试炼场入口预览</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  首页两格对照（2026-10「试炼场从指定位置进去」方案 3AB）：
+    ① debug 开着：右上角多了「试炼」按钮（在「设置」左边一个身位），底部还有一行 debug 提示
+    ② debug 关掉（正式版）：**只剩「设置」**，底部提示也没了 —— 和现在玩家看到的首页一模一样
+
+  用法：bash tools/shot-boss.sh title      产出 docs/title-trial-entry.png
+-->
+<canvas id="out" width="812" height="830"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var W = 812, H = 375, CAP = 26;
+  var NOTCH = { top: 0, left: 44, right: 44, bottom: 21 };   // 横屏刘海机：左右各让 44
+
+  function mkScene(debugOn, insets, reserve) {
+    G.Config.debug.enabled = debugOn;
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(W, H, insets || {});
+    g.setMenuReserve({ top: reserve || 0 });
+    g.state = 'title';
+    g.settingsOpen = false; g.infoOpen = false;
+    /* 假装有一局没打完（真机上他看到的是这样，带一行"上次：第 1 关…"） */
+    g.resumeData = { level: 5 };
+    g.pendingResume = { stage: 1, kills: 37 };
+    return g;
+  }
+  function render(g, insets, reserve) {
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var r = new G.Renderer(cv.getContext('2d'), {
+      cfg: G.Config,
+      createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+    });
+    r.resize(W, H);
+    r.setInsets(insets || {});
+    r.setMenuReserve({ top: reserve || 0 });
+    r.draw(g, 1.0);
+    return cv;
+  }
+
+  var panels = [];
+  var g1 = mkScene(true);
+  var R1 = g1.titleRects();
+  panels.push({ title: '① 调试模式（debug.enabled = true）：右上角「试炼」在「设置」左边一个身位', cv: render(g1), mark: R1.trial });
+  var g2 = mkScene(false);
+  panels.push({ title: '② 正式版（debug.enabled = false）：只剩「设置」，底部提示也没了 —— 和现在一模一样', cv: render(g2), mark: null });
+  /* ③ 底部中间那个「开局：长剑」点开的样子（2026-10 口径：开局禁止选武器，其他不可选） */
+  var g3 = mkScene(false);
+  g3.loadoutOpen = true;
+  panels.push({ title: '③ 点「开局：长剑」→ 面板：只有默认那把亮着，其余四把锁着（点了没反应）', cv: render(g3), mark: null });
+  /* ④⑤ 微信**原生胶囊按钮**在首页右上角（和游戏内暂停键是同一个角）：
+     ④ = 不避让（改动前，胶囊直接盖住「设置」/「试炼」）；⑤ = 避让后（整排下移到胶囊下面）。
+     左边那枚「好友排行榜」和它们同一行 —— 必须一起下移，否则两枚按钮一高一低。 */
+  var g4 = mkScene(true, NOTCH, 0), R4 = g4.titleRects();
+  panels.push({ title: '④ 首页 + 原生胶囊（不避让 = 改动前）：胶囊盖住「设置」/「试炼」', cv: render(g4, NOTCH, 0),
+    mark: null, capsule: true, capsuleInsets: NOTCH });
+  var g5 = mkScene(true, NOTCH, 48), R5 = g5.titleRects();
+  panels.push({ title: '⑤ 首页 + 原生胶囊（避让后 = 现在）：右上那排整体下移到胶囊下面（「试炼」只在 debug 开着时才有）', cv: render(g5, NOTCH, 48),
+    mark: R5.settings, capsule: true, capsuleInsets: NOTCH });
+  G.Config.debug.enabled = true;                      // 还原（预览页不改项目文件，但别再动全局）
+
+  var outCv = document.getElementById('out');
+  outCv.width = 812;                                  // 高度按格数算，加格子不用回头改脚本常量
+  outCv.height = panels.length * (H + CAP + 10) + CAP + 6;
+  var out = outCv.getContext('2d');
+  out.fillStyle = '#0d0f12'; out.fillRect(0, 0, outCv.width, outCv.height);
+  out.font = '600 13px "PingFang SC","Microsoft YaHei",monospace';
+  for (var k = 0; k < panels.length; k++) {
+    var y = k * (H + CAP + 10) + CAP + 6;
+    out.fillStyle = '#cfe9a8';
+    out.fillText(panels[k].title, 4, y - 7);
+    out.drawImage(panels[k].cv, 0, y);
+    /* 平台自己画的胶囊按钮（真机上它在最上层，游戏盖不住）—— 不画就看不出冲突，等于没验 */
+    if (panels[k].capsule) {
+      var cw = 88, chh = 32, cx0 = W - 7 - cw, cy0 = y + 6, rr = 16;
+      out.save();
+      out.globalAlpha = 0.96;
+      out.fillStyle = '#f6f6f6';
+      out.beginPath();
+      out.moveTo(cx0 + rr, cy0);
+      out.lineTo(cx0 + cw - rr, cy0); out.quadraticCurveTo(cx0 + cw, cy0, cx0 + cw, cy0 + rr);
+      out.lineTo(cx0 + cw, cy0 + chh - rr); out.quadraticCurveTo(cx0 + cw, cy0 + chh, cx0 + cw - rr, cy0 + chh);
+      out.lineTo(cx0 + rr, cy0 + chh); out.quadraticCurveTo(cx0, cy0 + chh, cx0, cy0 + chh - rr);
+      out.lineTo(cx0, cy0 + rr); out.quadraticCurveTo(cx0, cy0, cx0 + rr, cy0);
+      out.closePath(); out.fill();
+      out.fillStyle = '#111';
+      out.font = '700 15px "PingFang SC","Microsoft YaHei",monospace';
+      out.textAlign = 'center'; out.textBaseline = 'middle';
+      out.fillText('⋯', cx0 + 26, cy0 + chh / 2);
+      out.beginPath(); out.arc(cx0 + 42, cy0 + chh / 2 - 5, 4.6, 0, 7); out.fill();
+      out.beginPath(); out.arc(cx0 + cw - 24, cy0 + chh / 2, 9, 0, 7); out.lineWidth = 2;
+      out.strokeStyle = '#111'; out.stroke();
+      out.beginPath(); out.arc(cx0 + cw - 24, cy0 + chh / 2, 2.4, 0, 7); out.fill();
+      out.restore();
+    }
+    if (panels[k].mark) {                              // 把新按钮圈出来，一眼看到在哪
+      var m = panels[k].mark;
+      out.strokeStyle = '#ffd166'; out.lineWidth = 2;
+      out.strokeRect(m.x - 3, y + m.y - 3, m.w + 6, m.h + 6);
+    }
+  }
+  document.title = 'READY ' + outCv.width + 'x' + outCv.height;
+  } catch (e) {
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

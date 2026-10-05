@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>武器技能 · 精英掉落（教学三帧）</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  "武器技能改成精英掉落"这一版的验收图（真渲染器 + 真 draw()，横屏 812×375 和真机同比例）。
+  四格 = 玩家会依次经历的四个画面：
+    ① 精英入场（第 1 波教学）：**只有精英 + 随行 3 只慢速杂兵**（怪群被 gate 挂起）+
+       头顶紫色名字「铁甲母蟹」+ 顶部血条那行"击败精英 · 可能掉落武器技能"
+       （⚠️ 图里它是**手工挪到镜头里**的；真机上它和随行小怪都从屏幕外走进来）
+    ② 精英刚死：地上掉卷轴（金色光柱 + 挂字「穿云剑气 · 长剑」）+ 飘字"掉落 · 穿云剑气"
+    ③ 捡起来：全屏"获得 · 穿云剑气 / 长剑的技能 · 跟随武器生效"
+    ④ 卷轴掉在屏幕外：屏幕边缘一个金色箭头指路（"不消失、等玩家自己来捡"必须配这个）
+  用法：bash tools/shot-boss.sh skilldrop   → docs/skill-drop.png
+  ⚠️ 断言只能证明"画了这些字"，证明不了"没和敌潮预警/关卡栏叠在一起" —— 版式必须出图看。
+-->
+<canvas id="out" width="812" height="1620"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var W = 812, H = 375, CAP = 26;
+
+  function mkScene() {
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(W, H);
+    g.state = 'play'; g.hint = '';
+    g.wave = 1;
+    g.trial.delay = 0;
+    g.updateTrialSpawns(0.5);          // 第 1 波开场：只放精英 + 随行慢速杂兵（怪群被 gate 挂起）
+    var P = g.player;
+    P.hp = P.stats.maxhp * 0.72;
+    return g;
+  }
+  /* 把精英挪到镜头里（真机是它自己从屏幕外走进来的；出图要能看到它） */
+  function bringEliteIn(g, dx, dy) {
+    var e = null;
+    for (var i = 0; i < g.foes.length; i++) if (g.foes[i].trialElite) e = g.foes[i];
+    if (e) { e.x = g.player.x + (dx === undefined ? 190 : dx); e.y = g.player.y + (dy === undefined ? -46 : dy); }
+    return e;
+  }
+  /* 随行杂兵同理：真机它们在屏幕外，出图要把它们拉到精英身边才看得到"这一小撮"。 */
+  function bringMatesIn(g, e) {
+    if (!e) return;
+    var n = 0;
+    for (var i = 0; i < g.foes.length; i++) {
+      var f = g.foes[i];
+      if (!f.startMate) continue;
+      var a = -0.9 + n * 0.9;
+      f.x = e.x + Math.cos(a) * 56; f.y = e.y + Math.sin(a) * 56 + 30; n++;
+    }
+  }
+
+  var cases = [];
+  /* ① 精英入场 */
+  cases.push({ t: '① 精英入场（第 1 波教学）：只有精英 + 随行 3 只慢速杂兵，头顶紫色「精英 · 铁甲母蟹」（菱形已去掉）；怪群被 gate 挂起',
+    g: (function () { var g = mkScene(); var e = bringEliteIn(g); bringMatesIn(g, e); return g; })() });
+  /* ② 精英死 → 掉卷轴 */
+  cases.push({ t: '② 精英刚死：地上掉卷轴（发光 + 星点闪烁 + 上升火星），挂字「穿云剑气 · 长剑」+ 飘字"掉落 · 穿云剑气"',
+    g: (function () {
+      var g = mkScene(); var e = bringEliteIn(g);
+      g.dropSkillScroll(g.player.x + 150, g.player.y + 30);   // 直接走掉落逻辑（等价于 onFoeDeath 里那一步）
+      /* ⚠️ 出图脚本要自己把尸体挪走：onFoeDeath 之后真正移除它的是 damageFoe 那条链，
+         这里只调了掉落那一步，不挪走的话图上会出现"死了还站着一条血条"的假象。 */
+      if (e) g.foes.splice(g.foes.indexOf(e), 1);
+      g.trial.eliteDead = true;
+      return g;
+    })() });
+  /* ③ 捡起来 */
+  cases.push({ t: '③ 捡起来：全屏"获得 · 穿云剑气 / 长剑的技能 · 跟随武器生效"',
+    g: (function () {
+      var g = mkScene(); var e = bringEliteIn(g);
+      if (e) g.foes.splice(g.foes.indexOf(e), 1);
+      g.trial.eliteDead = true;
+      g.dropSkillScroll(g.player.x + 60, g.player.y + 20);
+      var s = g.pickups.filter(function (u) { return u.kind === 'skill'; })[0];
+      g.collect(s);
+      /* collect() 只负责"学会"，从地上抹掉是 updatePickups 的事（这里手动补一下，否则卷轴还画着） */
+      g.pickups.splice(g.pickups.indexOf(s), 1);
+      return g;
+    })() });
+  /* ④ 卷轴掉在屏幕外 → 边缘箭头指路 */
+  cases.push({ t: '④ 卷轴掉在视野外：屏幕边缘金色箭头指路（不消失，但必须找得到）',
+    g: (function () {
+      var g = mkScene();
+      g.dropSkillScroll(g.player.x + 900, g.player.y - 420);
+      g.pickups.forEach(function (u) { if (u.kind !== 'skill') u.t = 99; });
+      return g;
+    })() });
+
+  /* ⑤ 实战 1:1：脉冲提亮那一刻（每 2.5s 一次）—— 看真实尺寸下会不会太抢眼 */
+  cases.push({ t: '⑤ 同上，但停在脉冲提亮那一刻（t=5.0，每 2.5s 一次）：看真实尺寸下过不过分',
+    tt: 5,
+    g: (function () {
+      var g = mkScene(); var e = bringEliteIn(g);
+      g.dropSkillScroll(g.player.x + 150, g.player.y + 30);
+      if (e) g.foes.splice(g.foes.indexOf(e), 1);
+      g.trial.eliteDead = true;
+      return g;
+    })() });
+
+  /* ⑥ 捡起卷轴、学会技能之后：怪群才开始正常刷 —— 这是教学 gate 的后半段 */
+  cases.push({ t: '⑥ 捡起卷轴（学会技能）之后：怪群才开始正常刷 —— 教学 gate 的后半段（前半段见①）',
+    g: (function () {
+      var g = mkScene(); var e = bringEliteIn(g);
+      if (e) g.foes.splice(g.foes.indexOf(e), 1);
+      g.trial.eliteDead = true; g.trial.skillTaken = true;      // 等价于"已经走过去把卷轴捡起来"
+      g.trial.delay = 0;
+      for (var i = 0; i < 12; i++) g.updateTrialSpawns(0.5);
+      return g;
+    })() });
+
+  /* ⑦ Boss 头顶也是紫色名字（2026-10 用户口径：精英怪和 Boss 头顶显示对应的名字；Boss 的类型是「领主」） */
+  cases.push({ t: '⑦ Boss 头顶紫色「领主 · 荒原巨蝎」+ 脚下紫色光圈（**只有一圈**：围着身体那圈已去掉）',
+    g: (function () {
+      var g = mkScene();
+      /* ⚠️ 顶部那行只画"第一个找到的精英或 Boss"。不清场的话图里看到的还是精英那行，
+         就验不到领主的紫名字/紫条了 —— 这里把精英和随行清掉，只留 Boss。 */
+      g.foes.length = 0;
+      var b = g.Entities.makeBoss(G.Config, g.player.x + 215, g.player.y - 26, 1, 'warden', 1);
+      b.hp = b.maxhp * 0.62;
+      g.foes.push(b); g.bossAlive = 1; g.stageBossPending = true;
+      return g;
+    })() });
+
+  /* ⑧ 怪堆里的技能卷轴：光柱画在怪之后 —— 这就是"怪物太多会被覆盖住"这个问题的答案 */
+  cases.push({ t: '⑧ 怪堆里的技能卷轴：光柱画在怪**之后**，怪物再多也压不住（对比：脚边那卷轴本体其实已经被埋住了）',
+    g: (function () {
+      var g = mkScene();
+      g.foes.length = 0;                       // 清掉精英和随行，直接铺一片杂兵
+      g.trial.eliteDead = true; g.trial.skillTaken = true; g.trial.delay = 0;
+      for (var i = 0; i < 14; i++) g.updateTrialSpawns(0.5);
+      /* 把怪堆摊在卷轴周围，才看得出"盖不盖得住" */
+      var P = g.player;
+      for (var j = 0; j < g.foes.length; j++) {
+        var a = j / Math.max(1, g.foes.length) * 6.283;
+        g.foes[j].x = P.x + Math.cos(a) * (64 + (j % 3) * 30);
+        g.foes[j].y = P.y + Math.sin(a) * (50 + (j % 3) * 24) + 8;
+      }
+      g.dropSkillScroll(P.x + 16, P.y + 8);
+      return g;
+    })() });
+
+  var outCv = document.getElementById('out');
+  var off = document.createElement('canvas'); off.width = W; off.height = H;
+  var R = new G.Renderer(off.getContext('2d'), {
+    cfg: G.Config,
+    createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; },
+    hint: '', restartHint: ''
+  });
+  R.resize(W, H);
+
+  var ZTOP = 6 + cases.length * (H + CAP) + 30;      // 末尾放放大对比
+  var ZCW = 406, ZCH = 300, Z = 2.4;
+  var STOP = ZTOP + ZCH + 34;                        // 再往下：卷轴表现的三个版本对照
+  var SCW = Math.round(W / 3), SCH = 250, SZ = 3.0;
+  outCv.width = W; outCv.height = STOP + 2 * (SCH + 26) + 6;   // 卷轴对照是 3 列 × 2 行
+  var ctx = outCv.getContext('2d');
+  ctx.font = '600 13px "PingFang SC","Microsoft YaHei",monospace';
+
+  for (var i = 0; i < cases.length; i++) {
+    var cy = 6 + i * (H + CAP);
+    ctx.fillStyle = '#cfe9a8';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(cases[i].t, 6, cy + CAP - 8);
+    var ct = cases[i].tt || 1;
+    R.lastT = ct; R.dt = 1 / 60; R.hpLag = cases[i].g.player.hp / cases[i].g.player.stats.maxhp;
+    R.draw(cases[i].g, ct);
+    ctx.drawImage(off, 0, cy + CAP);
+    ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, cy + CAP + 0.5, W - 1, H - 1);
+  }
+
+  /* ---- 末尾：精英标识放大对比（真渲染器画的怪 + 标识）----
+     ⚠️ 这一行必须直接画在**输出**画布上：R 绑的是离屏画布，用它画完不 drawImage 回来就是整片空白
+     （preview-lowhp 那次也是栽在这，出图才发现）。 */
+  var ZR = new G.Renderer(ctx, {
+    cfg: G.Config,
+    createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+  });
+  ZR.resize(W, H);
+  var zCells = [
+    { t: '⑤ 精英：脚下一圈精英色地面光环 + 头顶精英色菱形', elite: true },
+    { t: '⑥ 普通腐甲寄生蟹（对照：什么标识都没有）', elite: false }
+  ];
+  for (var c2 = 0; c2 < zCells.length; c2++) {
+    var zx = c2 * ZCW, zy = ZTOP;
+    ctx.save();
+    ctx.fillStyle = '#3f6b33'; ctx.fillRect(zx, zy, ZCW - 1, ZCH);
+    ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 1;
+    ctx.strokeRect(zx + 0.5, zy + 0.5, ZCW - 2, ZCH - 1);
+    ctx.fillStyle = '#cfe9a8'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(zCells[c2].t, zx + 6, zy - 6);
+    var gz = mkScene();
+    var obj = zCells[c2].elite ? bringEliteIn(gz, 260, -40) : G.Entities.makeFoe(G.Config, 'tank', 0, 0, 1, 1);
+    obj.x = 400; obj.y = 300;
+    if (obj.hp === obj.maxhp) obj.hp = obj.maxhp * 0.72;    // 让血条也看得见（顺带核一下和标识的位置关系）
+    ctx.save();
+    ctx.translate(zx + ZCW / 2, zy + ZCH * 0.56);
+    ctx.scale(Z, Z);
+    ctx.translate(-obj.x, -obj.y);
+    ZR.lastT = 1;
+    ZR.drawFoes([obj], 1);
+    ctx.restore();
+    ctx.restore();
+  }
+
+  /* ---- 卷轴在地上的几版对照（放大 3x）。用户 2026-10 先否了"竖光柱+深色字牌"，
+          再挑编号 3+4+6 加了星点闪烁 / 上升火星 / 周期性脉冲，所以现在默认是 'magic'。 ---- */
+  var sStyles = [
+    { t: '⑦ 更早那版（竖光柱，已否）', style: 'pillar', tt: 1 },
+    { t: '⑧ 只有卷轴 + 落地阴影', style: 'scroll', tt: 1 },
+    { t: '⑨ 卷轴 + 地上柔光', style: 'glow', tt: 1 },
+    { t: '⑩ 现在默认：+ 星点 + 火星', style: 'magic', tt: 1 },
+    { t: '⑪ 同上，脉冲提亮那一刻', style: 'magic', tt: 5 },
+    { t: '⑫ 同上，3.4x 看细节', style: 'magic', tt: 1, sz: 3.4 }
+  ];
+  for (var s2 = 0; s2 < sStyles.length; s2++) {
+    var col = s2 % 3, row = Math.floor(s2 / 3);
+    var sx2 = col * SCW, sy2 = STOP + row * (SCH + 26);
+    var szz = sStyles[s2].sz || SZ;
+    ctx.save();
+    ctx.fillStyle = '#3f6b33'; ctx.fillRect(sx2, sy2, SCW - 1, SCH);
+    ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 1;
+    ctx.strokeRect(sx2 + 0.5, sy2 + 0.5, SCW - 2, SCH - 1);
+    ctx.fillStyle = '#cfe9a8'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(sStyles[s2].t, sx2 + 4, sy2 - 6);
+    var SR = new G.Renderer(ctx, {
+      cfg: G.Config, scrollStyle: sStyles[s2].style,
+      createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+    });
+    SR.resize(W, H);
+    var pk = G.Entities.makePickup('skill', 400, 300, 'sword_wave');
+    pk.vx = 0; pk.vy = 0;                              // 出图要静止（不跑 updatePickups，它本来也不动）
+    ctx.save();
+    ctx.translate(sx2 + SCW / 2, sy2 + SCH * 0.58);
+    ctx.scale(szz, szz);
+    ctx.translate(-400, -300);
+    SR.lastT = sStyles[s2].tt;
+    SR.drawPickups([pk], sStyles[s2].tt);
+    ctx.restore();
+    ctx.restore();
+  }
+
+  /* ---- 末尾：**会动的那一版光柱**。上面全是静止帧，而光柱的呼吸 / 每 2.5s 脉冲 / 上升光尘
+          只有动起来才判断得了（静止图只能看形，看不出"活不活"）。
+          直接用浏览器打开这一页就能看到；截图脚本按 title 里的高度裁窗口，所以这块高度也要算进去。 */
+  var LIVECAP = 26;
+  var liveCv = document.createElement('canvas');
+  liveCv.width = W; liveCv.height = H + LIVECAP;
+  liveCv.style.cssText = 'display:block;margin:8px 0 0';
+  document.body.appendChild(liveCv);
+  var lctx = liveCv.getContext('2d');
+  lctx.font = '600 13px "PingFang SC","Microsoft YaHei",monospace';
+  lctx.fillStyle = '#cfe9a8'; lctx.textAlign = 'left'; lctx.textBaseline = 'alphabetic';
+  lctx.fillText('★ 会动的那一版（浏览器直接打开本页即可看）：怪堆里的技能卷轴光柱 —— 呼吸 + 每 2.5s 脉冲 + 上升光尘', 6, LIVECAP - 8);
+  var lR = new G.Renderer(lctx, {
+    cfg: G.Config,
+    createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+  });
+  lR.resize(W, H);
+  var lg = mkScene();                       // 场景和上面第⑧格一样：怪堆 + 一个技能卷轴
+  lg.foes.length = 0;
+  lg.trial.eliteDead = true; lg.trial.skillTaken = true; lg.trial.delay = 0;
+  for (var i3 = 0; i3 < 14; i3++) lg.updateTrialSpawns(0.5);
+  var lp = lg.player;
+  for (var j3 = 0; j3 < lg.foes.length; j3++) {
+    var a3 = j3 / Math.max(1, lg.foes.length) * 6.283;
+    lg.foes[j3].x = lp.x + Math.cos(a3) * (64 + (j3 % 3) * 30);
+    lg.foes[j3].y = lp.y + Math.sin(a3) * (50 + (j3 % 3) * 24) + 8;
+  }
+  lg.dropSkillScroll(lp.x + 16, lp.y + 8);
+  var lpk = lg.pickups[lg.pickups.length - 1];
+  var lt = 0;
+  (function live() {
+    lt += 1 / 60;
+    if (lpk) { lpk.t = lt; lpk.life = lt; }   // 卷轴自己的计时（真机由 updatePickups 推）
+    lR.draw(lg, lt);
+    requestAnimationFrame(live);
+  })();
+
+  document.title = 'READY ' + W + 'x' + (outCv.height + 8 + liveCv.height);
+  } catch (e) {
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>角色模型 · 现状放大</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  角色模型现状放大（3.2 倍）：给"优化角色模型"这个需求做基准线。
+  一格一种状态，格子里就是真渲染器画出来的角色（不是手绘示意）：
+    ① 裸装（只有武器，没护甲没饰品）   ② 有护甲（肩甲出现）   ③ 挥砍（刃在转）
+    ④ 走路中（bob 上下 + 腿左右错位）  ⑤ 狂热（金色轮廓）     ⑥ 双刀连击 3 层（头顶 x3 + 弧线）
+    ⑦ 收刃期充能环（涨到一半）         ⑧ 收刃涨满的闪光（"到点了"）
+  ⚠️ 2026-10 改动：原来的「⑥ 饰品光环（脚下光环 + 3 颗珠子）」**已经删掉**（用户口径
+     "饰品的光环就不用了"），那块位置改成了**挥刀充能环**（收刃期从 12 点顺时针涨满，
+     涨满闪一下）。所以现在装不装饰品，脚下都不再画那一圈 —— 别看到"饰品没表现了"就加回来。
+  ⚠️ 转动期（刃在转）脚下**什么都不画**：那 2.2 秒刀刃本身在转，再套一圈是噪音（见 ③）。
+  用途：讨论"要不要加描边/手臂/眼睛/走路动画"之前，先看清现在到底长什么样。
+  用法：bash tools/shot-boss.sh player   → docs/player-current.png
+-->
+<canvas id="out" width="812" height="390"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var CW = 270, CH = 178, COLS = 3, ZOOM = 2.4;
+  var outCv = document.getElementById('out');
+  var out = outCv.getContext('2d');
+  var R = new G.Renderer(out, {
+    cfg: G.Config,
+    createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+  });
+  R.resize(812, 390);
+
+  function mkPlayer(setup) {
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(812, 375);
+    var P = g.player;
+    P.x = 400; P.y = 300; P.bob = 0; P.inv = 0; P.frenzy = 0; P.slowT = 0; P.comboStacks = 0;
+    P.equip.armor = null; P.equip.trinket = null;
+    if (setup) setup(g, P);
+    return g;
+  }
+  function mkArmor(g) {
+    var r = G.Config.items.rarities[2];
+    return { id: 'pv-armor', slot: 'armor', kind: 'armor', name: '石甲', rarity: r.id, rarityName: r.name, color: r.color, affixes: [] };
+  }
+  function mkTrinket(g) {
+    var r = G.Config.items.rarities[3];
+    return { id: 'pv-trinket', slot: 'trinket', kind: 'trinket', name: '护符', rarity: r.id, rarityName: r.name, color: r.color, affixes: [] };
+  }
+  /** 充能环状态：**收刃期**走了 frac（环只在收刃期画；分母 = 这一把武器的收刃时长） */
+  function charge(g, P, frac) {
+    var op = g.orbitParams();
+    P.orbOn = false; P.orbTotal = op.rest;
+    P.orbT = op.rest * (1 - Math.max(0, Math.min(1, frac)));
+    P.orbChargeFlash = 0;
+  }
+  /** 转动期：脚下**不画环**（用户口径"转的时候这个圈不显示"） */
+  function spinning(g, P) {
+    var op = g.orbitParams();
+    P.orbOn = true; P.orbTotal = op.spin; P.orbT = op.spin * 0.6; P.orbChargeFlash = 0;
+  }
+  function draw(cell, g, label, zoom) {
+    var ctx = out;
+    var z = zoom || ZOOM;
+    var cx = (cell % COLS) * CW, cy = Math.floor(cell / COLS) * (CH + 20) + 18;
+    ctx.save();
+    ctx.fillStyle = '#3f6b33'; ctx.fillRect(cx + 4, cy, CW - 8, CH);          // 和草地一个色，看对比度
+    ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 1;
+    ctx.strokeRect(cx + 4.5, cy + 0.5, CW - 9, CH - 1);
+    ctx.beginPath(); ctx.moveTo(cx, cy + CH); ctx.lineTo(cx + CW, cy + CH);
+    ctx.strokeStyle = 'rgba(255,255,255,.12)'; ctx.stroke();
+    ctx.fillStyle = '#cfe9a8'; ctx.font = '600 12px "PingFang SC","Microsoft YaHei",monospace';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(label, cx + 8, cy - 4);
+    // 真渲染器把角色画在格子中央
+    var P = g.player;
+    ctx.save();
+    /* 脚踩在格子下方 26px 处：角色整体（含头顶）刚好落在格子里，不会被裁 */
+    ctx.translate(cx + CW / 2, cy + CH - 26);
+    ctx.scale(z, z);
+    ctx.translate(-P.x, -P.y);
+    R.drawPlayer(P, 1.0);
+    ctx.restore();
+    ctx.restore();
+  }
+
+  var cells = [];
+  cells.push(mkPlayer(null));                                                   // ① 待机
+  cells.push(mkPlayer(function (g, P) { P.moving = true; P.bob = 1.15; }));     // ② 走路（迈腿摆臂）
+  cells.push(mkPlayer(function (g, P) { spinning(g, P); }));                    // ③ 挥砍（转动期 → 脚下**不画环**）
+  cells.push(mkPlayer(function (g, P) { P.dash = 0.14; P.face = 0; }));         // ④ 冲刺（前倾 + 残影）
+  cells.push(mkPlayer(function (g, P) { P.equip.armor = mkArmor(g); }));        // ⑤ 护甲肩甲
+  cells.push(mkPlayer(function (g, P) { charge(g, P, 0.5); }));                 // ⑥ 充能环（收刃一半）
+  cells.push(mkPlayer(function (g, P) { P.frenzy = 3; }));                      // ⑦ 狂热（取中段：避开开启那一瞬的 X 闪光）
+  cells.push(mkPlayer(function (g, P) { P.comboStacks = 3; P.equip.weapon.kind = 'dagger'; })); // ⑧ 双刀 3 层
+  cells.push(mkPlayer(null));                                                   // ⑨ 真实大小 1x
+  cells.push(mkPlayer(function (g, P) { P.moving = true; P.bob = 1.15; P.face = Math.PI; })); // ⑩ 朝左跑（现在故意不翻转）
+  cells.push(mkPlayer(function (g, P) {                                         // ⑪ 填满 → 小点闪
+    charge(g, P, 1);
+    P.orbChargeFlash = G.Config.feel.attackRing.flash * 0.5;                    // 取闪光中段才看得见"外扩"
+  }));
+  /* ⚠️ 装不装饰品都不该画脚下一圈（饰品光环已删）—— ⑫ 留着当回归用的对照格 */
+  cells.push(mkPlayer(function (g, P) { P.equip.trinket = mkTrinket(g); charge(g, P, 0.5); }));
+
+  /* ⚠️ 标签宽度上限：格宽 270px @12px ≈ 20 个汉字。写长了会溢到下一格、在右边缘被截掉
+     （⑨/⑩ 原来就是这么被截的 —— 这里一律压到 ~20 字以内）。 */
+  var labels = ['① 待机（裸装）', '② 走路（迈腿/摆臂）', '③ 挥砍 · 转动段也有环',
+            '④ 冲刺（前倾/残影）', '⑤ 护甲肩甲', '⑥ 充能环 整圈50%',
+            '⑦ 狂热（贴身体的光）', '⑧ 双刀 3 层连击', '⑨ 真实大小 1x',
+            '⑩ 朝左跑（不翻转）', '⑪ 填满 → 小点闪', '⑫ 有饰品（对照）'];
+  /* ⚠️ 画布尺寸必须在**画之前**设好：设 width/height 会清空画布（画完再改 = 全白） */
+  outCv.width = COLS * CW;
+  outCv.height = Math.ceil(cells.length / COLS) * (CH + 20) + 18;
+  out = outCv.getContext('2d');
+  for (var i = 0; i < cells.length; i++) draw(i, cells[i], labels[i], i === 8 ? 1 : ZOOM);
+
+  document.title = 'READY ' + outCv.width + 'x' + outCv.height;
+  } catch (e) {
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

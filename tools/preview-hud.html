@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>HUD · 左上信息卡（血/经验）</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  整屏 HUD 预览（真渲染器、真 draw()，横屏 812×375 —— 和真机一个比例）。
+  给"血条/经验条从角色头顶挪到左上角信息卡"这个改动做验收：
+    ① 满血 + 经验半格（基础版式：Lv / 血条 / 经验条 / 装备格 一张卡）
+    ② 掉血中（浅红滞影还在追）+ 残血四边泛红
+    ③ 有卡可升（Lv 旁金点 + 经验条变金）+ 限次爆发徽标仍挂在角色头顶（没被顺手改动）
+  用法：bash tools/shot-boss.sh hud   → docs/hud-corner-card.png
+  ⚠️ 断言只能证明"画了血条"，证明不了"没和关卡栏/右上信息叠在一起、装备格没被挤出卡外"——
+     所以这类版式改动必须出图看。
+-->
+<canvas id="out" width="812" height="1250"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var W = 812, H = 375, CAP = 26;
+  var NOINS = { top: 0, left: 0, right: 0, bottom: 0 };
+  var NOTCH = { top: 0, left: 44, right: 44, bottom: 21 };   // 横屏刘海机：左右各 44
+
+  function mkScene(setup, insets) {
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(W, H, insets || NOINS);
+    g.state = 'play';
+    g.hint = '';
+    g.cam.x = 0; g.cam.y = 0;
+    var P = g.player;
+    P.x = 430; P.y = 210; P.face = 0; P.bob = 0; P.moving = false; P.dash = 0; P.frenzy = 0;
+    /* 摆几只怪：不打磨场景，只要"HUD 压在什么画面上"这件事看得清 */
+    g.foes.length = 0;
+    for (var i = 0; i < 7; i++) {
+      var a = i / 7 * Math.PI * 2;
+      g.foes.push(G.Entities.makeFoe(G.Config, i % 3 === 0 ? 'tank' : 'slime',
+        P.x + Math.cos(a) * (120 + i * 14), P.y + Math.sin(a) * (80 + i * 10), 1, 1));
+    }
+    if (setup) setup(g, P);
+    return g;
+  }
+
+  var cases = [];
+  /* ① 基础版式：满血、经验半格 —— 看条和装备格、关卡栏、右上有没有挤到一起
+     ⚠️ 2026-10 改版对照点：击杀/金币 已挪到**左上卡最后一行**（图标+数字），右上角只剩暂停键 */
+  cases.push({ title: '① 常规：血满 / 经验半格（击杀·金币在左上卡最后一行，右上只剩暂停键）', g: mkScene(function (g, P) {
+    P.hp = P.stats.maxhp; P.xp = Math.round(P.xpNext * 0.5); P.pendingLevels = 0;
+    P.kills = 128; P.gold = 86;
+  }) });
+  /* ② 掉血中：滞影（浅红）还在追 —— 让"掉血滞留"看得见 */
+  cases.push({ title: '② 掉血中：浅红滞影还在往回追 + 残血四边泛红', g: (function () {
+    var g = mkScene(function (g, P) { P.hp = P.stats.maxhp * 0.36; P.xp = Math.round(P.xpNext * 0.75); });
+    // 先把 hpLag 拉满再画，模拟"刚挨完一下"那一瞬
+    g.player.hp = g.player.stats.maxhp * 0.18;
+    return g;
+  })() });
+  /* ③ 有卡可升 + 限次爆发：金点 / 经验条变金 / 头顶徽标（这部分本次没动，做回归对照） */
+  cases.push({ title: '③ 有卡可升（经验条变金）+ 头顶爆发徽标（本次未改动，回归对照）', g: mkScene(function (g, P) {
+    P.hp = P.stats.maxhp * 0.82; P.xp = P.xpNext; P.pendingLevels = 2;
+    var w = G.Progression.makeDefaultWeapon(G.Config); w.kind = 'sword';
+    P.equip.weapon = w; P.bag = [w]; G.Progression.recompute(P, G.Config);
+    P.burst = { id: 'skyCut', name: '开天', left: 2, active: true, radiusMul: 5 };
+  }) });
+  /* ④ 横屏刘海机：左右各让 44 —— 卡片整体右移，最容易和顶部关卡栏撞上，必须出图确认 */
+  cases.push({ title: '④ 横屏刘海机（安全区左右各 44）：卡片右移后与顶部关卡栏/右上信息卡的距离', insets: NOTCH, g: mkScene(function (g, P) {
+    P.hp = P.stats.maxhp * 0.64; P.xp = Math.round(P.xpNext * 0.35); P.pendingLevels = 0;
+  }, NOTCH) });
+  /* ⑤⑥ 微信原生胶囊（右上角 ⋯／⊙）：safeArea 完全不管它，只能靠 getMenuButtonBoundingClientRect 避让。
+     两格对照 —— 同一版式，只有"有没有避让"不同，真机上以前就是⑤那个样子。 */
+  cases.push({ title: '⑤ 横屏 + 原生胶囊（不避让 = 改动前）：暂停键和击杀/金币卡压在胶囊底下', insets: NOTCH, capsule: true, reserve: 0,
+    g: mkScene(function (g, P) { P.hp = P.stats.maxhp * 0.8; P.xp = Math.round(P.xpNext * 0.6); }, NOTCH) });
+  cases.push({ title: '⑥ 横屏 + 原生胶囊（避让后 = 现在）：右上只剩暂停键，整体下移到胶囊下面', insets: NOTCH, capsule: true, reserve: 48,
+    g: mkScene(function (g, P) { P.hp = P.stats.maxhp * 0.8; P.xp = Math.round(P.xpNext * 0.6); }, NOTCH) });
+  /* ⑦ 暂停面板：2026-10 起「换武器」入口在这里（左下角那个按钮已删）。
+     要有两把武器才会出现那一行 —— 这一格同时验证"左下角是干净的"和"面板里换武器在第一位"。 */
+  cases.push({ title: '⑦ 暂停面板（手里两把武器）：第一行就是「换武器」——左下角那个 HUD 按钮已经删掉', insets: NOINS,
+    g: (function () {
+      var g = mkScene(function (gg, P) { P.hp = P.stats.maxhp * 0.8; P.kills = 128; P.gold = 86; });
+      var second = G.Progression.makeDefaultWeapon(G.Config);
+      second.id = 'pv-w2'; second.kind = 'spear'; second.name = G.Config.weapons.spear.name;
+      g.player.bag = [g.player.bag[0], second];
+      g.pause();
+      return g;
+    })() });
+
+  var outCv = document.getElementById('out');
+  var off = document.createElement('canvas'); off.width = W; off.height = H;
+  var offCtx = off.getContext('2d');
+  var R = new G.Renderer(offCtx, {
+    cfg: G.Config,
+    createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; },
+    hint: '', restartHint: ''
+  });
+  R.resize(W, H);
+
+  var ctx = outCv.getContext('2d');
+  outCv.width = W; outCv.height = cases.length * (H + CAP) + 6;
+  ctx = outCv.getContext('2d');       // ⚠️ 改 width/height 会清空画布并重置 ctx 状态（字体也要重新设）
+  ctx.font = '600 13px "PingFang SC","Microsoft YaHei",monospace';
+
+  for (var i = 0; i < cases.length; i++) {
+    var cy = 6 + i * (H + CAP);
+    ctx.fillStyle = '#cfe9a8';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(cases[i].title, 6, cy + CAP - 8);
+    R.lastT = 1.0; R.dt = 1 / 60;
+    var pc = cases[i].g.player;
+    R.setInsets(cases[i].insets || NOINS);              // HUD 全部按 insets 定位，必须跟场景一致
+    R.setMenuReserve({ top: cases[i].reserve || 0 });   // 右上角胶囊避让
+    cases[i].g.setMenuReserve({ top: cases[i].reserve || 0 });
+    R.hpLag = (i === 1) ? 1 : pc.hp / pc.stats.maxhp;   // 只有第②格要"刚挨完一下"的滞影
+    R.draw(cases[i].g, 1.0);
+    ctx.drawImage(off, 0, cy + CAP);
+    /* 把"平台自己画的胶囊按钮"也画上去（真机上它在最上层，游戏盖不住它）——
+       不画的话出图看不出冲突，等于没验。 */
+    if (cases[i].capsule) {
+      var cw = 88, chh = 32, cx0 = W - 7 - cw, cy0 = 6 + CAP + cy;
+      ctx.save();
+      ctx.globalAlpha = 0.96;
+      ctx.fillStyle = '#f6f6f6';
+      ctx.beginPath();
+      var rr = 16;
+      ctx.moveTo(cx0 + rr, cy0);
+      ctx.lineTo(cx0 + cw - rr, cy0); ctx.quadraticCurveTo(cx0 + cw, cy0, cx0 + cw, cy0 + rr);
+      ctx.lineTo(cx0 + cw, cy0 + chh - rr); ctx.quadraticCurveTo(cx0 + cw, cy0 + chh, cx0 + cw - rr, cy0 + chh);
+      ctx.lineTo(cx0 + rr, cy0 + chh); ctx.quadraticCurveTo(cx0, cy0 + chh, cx0, cy0 + chh - rr);
+      ctx.lineTo(cx0, cy0 + rr); ctx.quadraticCurveTo(cx0, cy0, cx0 + rr, cy0);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#111';
+      ctx.font = '700 15px ' + '"PingFang SC","Microsoft YaHei",monospace';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText('⋯', cx0 + 26, cy0 + chh / 2);
+      ctx.beginPath(); ctx.arc(cx0 + 42, cy0 + chh / 2 - 5, 4.6, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(cx0 + cw - 24, cy0 + chh / 2, 9, 0, 7); ctx.lineWidth = 2;
+      ctx.strokeStyle = '#111'; ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx0 + cw - 24, cy0 + chh / 2, 2.4, 0, 7); ctx.fill();
+      ctx.restore();
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, cy + CAP + 0.5, W - 1, H - 1);
+  }
+
+  document.title = 'READY ' + outCv.width + 'x' + outCv.height;
+  } catch (e) {
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

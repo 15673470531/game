@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>开局武器面板 · 熟练度读数预览</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  首页「开局武器」面板 + 熟练度读数（2026-10 用户选的方案 1：并进已有面板，零新增入口）。
+
+  四格 = 熟练度四个阶段（都走**真渲染器 + 真 game**，不是手绘示意）：
+    ① Lv1 · 0/300          刚上手：第一个目标就是"下一级 Lv2：解锁剑阵回响"
+    ② Lv1 · 150/300        打完一把（进度必然停在半格 —— Lv1 区间 0~300）
+    ③ Lv2 · 450/600        过了一次门槛：分母换成**本级上限** 600，下一级是叠刃
+    ④ Lv4 · 满级           满级不写数字，改说"满级奖励：打完 Boss 有几率掉「双刀」"
+
+  要点：读数**只有配了熟练度奖励表的武器才有**（大剑/长枪/法杖 没表 ⇒ 右上空着，
+        免得承诺"练了有奖励"）；"下一级解锁什么"**只给当前手上那把**（别的行那句要用来说怎么解锁）。
+
+  用法：bash tools/shot-boss.sh loadout    → docs/loadout-mastery.png
+        python3 tools/zoom-loadout.py      → /tmp/loadout-mastery-zoom.png（面板区放大逐字核）
+-->
+<canvas id="out" width="812" height="1600"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var W = 812, H = 375, CAP = 26;
+
+  function mkScene(mastery) {
+    G.Config.debug.enabled = false;                     // 正式版首页（debug 提示那行不掺进来）
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(W, H, {});
+    g.state = 'title';
+    g.settingsOpen = false; g.infoOpen = false; g.rankOpen = false;
+    g.player.mastery.sword = mastery;
+    g.loadoutOpen = true;                               // 就是这个面板
+    return g;
+  }
+  function render(g) {
+    var cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    var r = new G.Renderer(cv.getContext('2d'), {
+      cfg: G.Config,
+      createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+    });
+    r.resize(W, H);
+    r.draw(g, 1.0);
+    return cv;
+  }
+
+  var panels = [
+    { t: '① 刚上手（长剑熟练度 0）：右上 Lv1 · 0/300；说明就是第一个目标 —— 下一级 Lv2 解锁剑阵回响', m: 0 },
+    { t: '② 打完一把（150）：Lv1 · 150/300（Lv1 区间 0~300 ⇒ 打完一把必然停在半格）', m: 150 },
+    { t: '③ 过了一次门槛（450）：Lv2 · 450/600（分母换成本级上限），下一级是叠刃', m: 450 },
+    { t: '④ 满级（900）：Lv4 · 满级（不写 900/900 那种废话），改说"满级奖励：打完 Boss 有几率掉双刀"', m: 900 }
+  ];
+
+  var outCv = document.getElementById('out');
+  outCv.width = W;
+  outCv.height = panels.length * (H + CAP + 10) + CAP + 6;
+  var out = outCv.getContext('2d');
+  out.fillStyle = '#0d0f12'; out.fillRect(0, 0, outCv.width, outCv.height);
+  out.font = '600 13px "PingFang SC","Microsoft YaHei",monospace';
+  for (var k = 0; k < panels.length; k++) {
+    var y = k * (H + CAP + 10) + CAP + 6;
+    var g = mkScene(panels[k].m);
+    out.fillStyle = '#cfe9a8';
+    out.fillText(panels[k].t, 4, y - 7);
+    out.drawImage(render(g), 0, y);
+    /* 面板外框标一下（放大核对时好定位；这是给看图的人用的记号，不是产品里会画的东西） */
+    var P = g.loadoutRects().panel;
+    out.strokeStyle = 'rgba(143,214,165,.55)'; out.lineWidth = 1;
+    out.strokeRect(P.x - 2.5 + 0.5, y + P.y - 2.5 + 0.5, P.w + 5, P.h + 5);
+  }
+  document.title = 'READY ' + outCv.width + 'x' + outCv.height;
+  } catch (e) {
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

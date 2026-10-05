@@ -1,0 +1,38 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><title>大头 · 头带与眼睛</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style></head><body>
+<canvas id="out"></canvas>
+<script src="../core/config.js"></script><script src="../core/world.js"></script>
+<script src="../core/entities.js"></script><script src="../core/progression.js"></script>
+<script src="../core/save.js"></script><script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function(){try{
+var G=window.__GAME__, W=270,H=200,Z=6.0, out=document.getElementById('out');
+out.width=3*W; out.height=H+18;
+var R=new G.Renderer(out.getContext('2d'),{cfg:G.Config,createCanvas:function(w,h){var c=document.createElement('canvas');c.width=w;c.height=h;return c;}});
+R.resize(3*W,H+18);
+var ctx=out.getContext('2d');
+function mk(){var g=new G.Game(G.Config,{World:G.World,Entities:G.Entities,Progression:G.Progression,Save:G.Save});
+  g.setViewport(812,375);var P=g.player;P.x=400;P.y=300;P.face=0;P.bob=0;P.dash=0;P.moving=false;P.frenzy=0;P.slowT=0;P.comboStacks=0;P.orbOn=false;P.orbT=0;return g;}
+var spin=(G.Config.weapons.sword.orbit||{}).spin||0.9;
+var cases=[
+  {t:'① 待机（不攻击）',           f:function(P){P.orbOn=false;P.orbT=0;}},
+  {t:'② 攻击·起转那 0.2 秒',       f:function(P){P.orbOn=true;P.orbT=spin-0.1;}},
+  {t:'③ 攻击·持续中（刃还在转）',   f:function(P){P.orbOn=true;P.orbT=spin*0.5;}}
+];
+ctx.font='600 12px "PingFang SC","Microsoft YaHei",monospace';
+for(var i=0;i<3;i++){
+  var g=mk(),P=g.player; cases[i].f(P);
+  var cx=i*W, cy=18;
+  ctx.fillStyle='#3f6b33';ctx.fillRect(cx+4,cy,W-8,H);
+  ctx.fillStyle='#cfe9a8';ctx.fillText(cases[i].t,cx+8,cy-4);
+  ctx.save();
+  /* 6 倍、只框住头（把角色位置挪到格子底部中间偏下） */
+  /* 焦点 = 头部：把 (P.x, P.y-38) 放到格子中心 */
+  ctx.translate(cx+W/2, cy+H/2+10); ctx.scale(Z,Z); ctx.translate(-P.x, -(P.y-38));
+  R.drawPlayer(P,1.0);
+  ctx.restore();
+}
+document.title='READY '+out.width+'x'+out.height;
+}catch(e){document.title='ERR: '+(e&&e.message?e.message:e);}})();
+</script></body></html>

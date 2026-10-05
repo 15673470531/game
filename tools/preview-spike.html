@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>剑阵回响 · 地刺式三编排（2026-10）</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  「剑阵回响」攻击表现的改造（用户口径 2026-10）：
+    原话「被剑阵围住的，我想换一种攻击方式，感觉现在这种不太好看」
+    诊断：现在那三下本质是**三道光**（从顶点指向中心的白色锥形刀光）—— 用户前后否过两次
+          "抽象光带"，这次同一个病：读起来是"光扫过来"，不是"剑在斩"。
+    方案 2「地刺式」：阵内的地面依次炸起剑刺，把站在上面的怪从下往上穿透、顶起来一下。
+
+  三列 = 同一个"地刺式"的三种**编排**（剑刺本身的画法是同一个，只有出场顺序/方向不同）：
+     A 三边向内收拢：三条边各起一股、同时朝中心推进（呼应"被围住、往里收"）
+     B 单向横扫：一股从左上扫到右下（方向感最强，像被犁过去）
+     D 阵眼爆开：中心先起、越往外越晚（中心是爆点）
+  三行 = 波扫到 ① 25%（破土）② 60%（过半，怪已被扎住）③ 100%（出齐）三个时刻。
+
+  ⚠️ 剑刺只画**剑身（尖头 + 中脊高光）**，没有护手、没有柄 —— 和立在地上那三把（有护手/柄）区分开：
+     立着的是"阵"，从地里冒出来的是"贯穿"。
+  ⚠️ 阵内有怪的格子会把剑刺**吸附到怪脚下**（保证"被围住的每只都被扎到"）；网格点只是拿来补空的。
+     吸附这条是三种编排共用的，不参与对比。
+  ⚠️ 这是**预览页原型**，产品代码一行没动。底层场景（世界/角色/怪/三角）三行三列完全相同。
+
+  用法：bash tools/shot-boss.sh spike      产出 docs/sword-echo-spike.png
+-->
+<canvas id="out"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+    var G = window.__GAME__;
+    if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+    var W = 812, H = 375, Z = 2.5, C = G.Config.swordEcho.color;
+    var PX = 1200, PY = 800;
+    /* 三把剑的世界坐标（相对玩家）——和前面几张剑阵图同一组，方便对照 */
+    var TRI = [[-90, -70], [110, -54], [10, 96]];
+    /* 阵里 3 只 + 阵外 3 只（阵外那几只是用来核"只有围住的才被扎"） */
+    var FOES = [[-20, 20], [60, 0], [10, 50], [-150, -80], [160, -60], [10, 150]];
+    var SP_H = 34, SP_W2 = 3.2;          // 剑刺高度 / 剑身半宽（世界像素；比立剑短一点、宽一点）
+    var STEP = 36, MARGIN = 7;           // 网格间距 / 离边至少留多少（别让刺扎在边界线上）
+    var RISE = 0.22;                     // 一根刺从破土到出齐要占多少"波"
+    var DIRT = '#c2a86e';                // 被顶开的土（取自场景里土路那类色）
+    var LAST = '#e8f3d8';                // 土粒（和立剑落地扬尘同一个色）
+
+    /** 点到三角三条边的"深度"（>0 = 在里面；取到三条边的最小值 = 离边界的距离） */
+    function triDepth(px, py, t) {
+      var best = Infinity;
+      for (var i = 0; i < 3; i++) {
+        var a = t[i], b = t[(i + 1) % 3], c = t[(i + 2) % 3];
+        var ex = b.x - a.x, ey = b.y - a.y, L = Math.hypot(ex, ey) || 1;
+        var nx = -ey / L, ny = ex / L;
+        if ((c.x - a.x) * nx + (c.y - a.y) * ny < 0) { nx = -nx; ny = -ny; }   // 法线转向"内侧"
+        best = Math.min(best, (px - a.x) * nx + (py - a.y) * ny);
+      }
+      return best;
+    }
+    function clamp01(v) { return v < 0 ? 0 : (v > 1 ? 1 : v); }
+
+    /* ==================== 场景（三行三列共用） ==================== */
+    function build(variant, wave) {
+      var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+      g.setViewport(W, H);
+      g.state = 'play';
+      g.updateSpawns = function () {}; g.spawnFoe = function () {};
+      g.foes.length = 0; g.projectiles.length = 0; g.hazards.length = 0; g.pickups.length = 0;
+      g.skillNotice = null;
+      g.player.x = PX; g.player.y = PY; g.player.hp = g.player.stats.maxhp;
+      g.player.orbOn = false; g.player.orbT = 0.3;
+      FOES.forEach(function (p) {
+        var f = G.Entities.makeFoe(G.Config, 'slime', PX + p[0], PY + p[1], 1, 1);
+        f.hp = f.maxhp * 0.72; g.foes.push(f);
+      });
+      /* 产品那套技能状态**全清**：地刺的每一笔都由本页 overlay 画，
+         免得和产品的齐斩（三道锥形刀光 + 交汇点光斑）叠在一起分不清是谁画的。
+         ⚠️ 这里**不能**调 grantSkill —— 它会挂出"获得 · 剑阵回响"那条全屏横幅，
+            盖住画面中间（第一版就被它挡了）。这张图是静态预览，不需要技能真的在手。 */
+      g.skillNotice = null;
+      g.skillEchoSwords = []; g.skillEchoStrike = null; g.skillVisuals = [];
+
+      var tri = TRI.map(function (p) { return { x: PX + p[0], y: PY + p[1] }; });
+      var cx = (tri[0].x + tri[1].x + tri[2].x) / 3, cy = (tri[0].y + tri[1].y + tri[2].y) / 3;
+
+      /* ---- 网格：三角内按 STEP 撒点 ---- */
+      var xs = [tri[0].x, tri[1].x, tri[2].x], ys = [tri[0].y, tri[1].y, tri[2].y];
+      var minX = Math.min.apply(null, xs), maxX = Math.max.apply(null, xs);
+      var minY = Math.min.apply(null, ys), maxY = Math.max.apply(null, ys);
+      var pts = [], gx, gy;
+      for (gy = minY + STEP * 0.5; gy < maxY; gy += STEP) {
+        for (gx = minX + STEP * 0.5; gx < maxX; gx += STEP) {
+          var dp = triDepth(gx, gy, tri);
+          /* ⚠️ 角色脚下不冒刺（阵不扎自己人）：一是"自己站在阵里也会被扎"说不通，
+             二是刺是从**下往上**画的，画在角色身上会像插在自己身上。 */
+          if (dp >= MARGIN && Math.hypot(gx - PX, gy - PY) > 32) pts.push({ x: gx, y: gy, depth: dp, snap: false });
+        }
+      }
+      /* ---- 吸附：阵内的怪 → 最近的网格点搬到它脚下（每只被围住的怪都得挨一根） ---- */
+      g.foes.forEach(function (f) {
+        if (triDepth(f.x, f.y, tri) <= 0) return;
+        var best = null, bd = 26;
+        pts.forEach(function (p) {
+          if (p.snap) return;
+          var d = Math.hypot(p.x - f.x, p.y - f.y);
+          if (d < bd) { bd = d; best = p; }
+        });
+        if (best) { best.x = f.x; best.y = f.y; best.snap = true; }
+        else pts.push({ x: f.x, y: f.y, depth: 1, snap: true });   // 附近没格子就补一根在它脚下
+      });
+      /* ---- 波前：每根刺一个"延迟" d（0 = 最先冒，1 = 最后冒） ---- */
+      var maxDepth = 0, maxR = 1;
+      pts.forEach(function (p) {
+        maxDepth = Math.max(maxDepth, p.depth);
+        maxR = Math.max(maxR, Math.hypot(p.x - cx, p.y - cy));
+      });
+      var dx2 = 0.76, dy2 = 0.65;                                   // B 的扫描方向（左上 → 右下）
+      var projs = pts.map(function (p) { return p.x * dx2 + p.y * dy2; });
+      var pMin = Math.min.apply(null, projs), pMax = Math.max.apply(null, projs);
+      pts.forEach(function (p, i) {
+        if (variant === 'A') p.d = p.depth / (maxDepth || 1);                          // 贴边的先冒
+        else if (variant === 'B') p.d = (projs[i] - pMin) / Math.max(1, pMax - pMin);   // 一头扫到另一头
+        else p.d = clamp01(1 - Math.hypot(p.x - cx, p.y - cy) / maxR);                 // 中心先冒
+        p.p = clamp01((wave - p.d) / RISE);                                            // 出到几成
+        p.lead = wave - p.d;
+      });
+
+      /* ---- 被扎住的怪：剑刺出齐了就把它顶起来一点（并记下来给 overlay 画火花） ---- */
+      var hit = [];
+      g.foes.forEach(function (f) {
+        if (triDepth(f.x, f.y, tri) <= 0) return;
+        var near = null, bd = 1e9;
+        pts.forEach(function (p) { var d = Math.hypot(p.x - f.x, p.y - f.y); if (d < bd) { bd = d; near = p; } });
+        if (near && near.p >= 1) {
+          f.y -= 6;                                  // 顶起来那一下（真实实现里是短暂的抬升）
+          hit.push({ x: f.x, y: f.y });
+        }
+      });
+      if (g.parts && g.parts.text) hit.forEach(function (h) { g.parts.text(h.x, h.y - 34, '-28', '#ffe6a8'); });
+
+      g.pv = { tri: tri, cx: cx, cy: cy, pts: pts, variant: variant, wave: wave, hit: hit };
+      g.updateCamera();
+      return g;
+    }
+
+    function render(g) {
+      var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      var r = new G.Renderer(cv.getContext('2d'), {
+        cfg: G.Config,
+        createCanvas: function (w2, h2) { var c = document.createElement('canvas'); c.width = w2; c.height = h2; return c; }
+      });
+      r.resize(W, H);
+      r.draw(g, 0.016);
+      return cv;
+    }
+    /** 世界 → 屏幕（和渲染器同一套：translate → scale(zoom) → translate(-cam)） */
+    function sc(g, wx, wy) {
+      var z = (G.Config.camera && G.Config.camera.zoom) || 1;
+      return { x: (wx - g.cam.x) * z, y: (wy - g.cam.y) * z };
+    }
+
+    /* ==================== 地刺式的画法 ==================== */
+    /** 一根从地里冒出来的剑刺：只有剑身（尖头 + 中脊高光），没有护手没有柄。
+     *  p = 出到几成（0 = 还在土里），lead = 波还有多久到（>0 表示已经过了/正在冒）。 */
+    function spike(ctx, x, y, p, lead) {
+      if (p <= 0) {
+        if (lead > -0.18) {                        // 波快到了：土先鼓一下（有预兆，不然太突然）
+          ctx.globalAlpha = 0.30 * (1 + lead / 0.18);
+          ctx.fillStyle = DIRT;
+          ctx.beginPath(); ctx.ellipse(x, y + 1, 9, 3.4, 0, 0, 6.3); ctx.fill();
+        }
+        return;
+      }
+      var e = Math.pow(p, 0.85), h = SP_H * e;
+      /* 被顶开的土：一个**坑**（深色，草地/土路上都看得出）+ 上缘翻起来的亮土 + 两粒土块。
+         ⚠️ 颜色不能取土路那个色 —— 场景里到处都是土路，一撞就"看不见被顶开过"（第一版就是）。 */
+      var rx = 5.5 + 8 * (1 - e);
+      ctx.globalAlpha = 0.38 + 0.20 * (1 - e);
+      ctx.fillStyle = '#7d6738';
+      ctx.beginPath(); ctx.ellipse(x, y + 1, rx, rx * 0.36, 0, 0, 6.3); ctx.fill();
+      ctx.globalAlpha = 0.55 + 0.28 * (1 - e);
+      ctx.strokeStyle = '#e6d7a4'; ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.ellipse(x, y + 1, rx, rx * 0.36, 0, 0, 6.3); ctx.stroke();
+      ctx.globalAlpha = 0.50 + 0.30 * (1 - e);                 // 翻起来的土块
+      ctx.fillStyle = '#c2a86e';
+      for (var d = 0; d < 3; d++) {
+        var da = Math.PI * (0.25 + d * 0.32), dd = rx * 0.85;
+        ctx.beginPath();
+        ctx.arc(x + Math.cos(da) * dd, y + 1 - Math.sin(da) * dd * 0.36, 1.5 + 0.8 * (1 - e), 0, 6.3);
+        ctx.fill();
+      }
+      /* 剑身：**从地里长出来的刃** —— 尖头 + 一个"肩"（所以读起来是刃不是柱子），
+         没有护手、没有柄。基座比立着的那三把宽一点 → 两套东西不会看混。 */
+      ctx.globalAlpha = 0.70;
+      ctx.beginPath();
+      ctx.moveTo(x, y - h);                                    // 剑尖
+      ctx.lineTo(x + SP_W2, y - h * 0.30);                     // 肩
+      ctx.lineTo(x + SP_W2, y);
+      ctx.lineTo(x - SP_W2, y);
+      ctx.lineTo(x - SP_W2, y - h * 0.30);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(214,238,255,.72)'; ctx.fill();
+      ctx.globalAlpha = 0.95; ctx.strokeStyle = '#eaf6ff'; ctx.lineWidth = 1.6; ctx.stroke();
+      ctx.globalAlpha = 0.90; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.1;    // 中脊高光
+      ctx.beginPath(); ctx.moveTo(x, y - h + 1.5); ctx.lineTo(x, y - 2); ctx.stroke();
+      ctx.globalAlpha = 0.55; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.9;    // 两侧反光
+      ctx.beginPath();
+      ctx.moveTo(x - SP_W2 * 0.55, y - h * 0.45); ctx.lineTo(x - SP_W2 * 0.55, y - h * 0.12);
+      ctx.moveTo(x + SP_W2 * 0.55, y - h * 0.45); ctx.lineTo(x + SP_W2 * 0.55, y - h * 0.12);
+      ctx.stroke();
+      /* 破土那一下：几粒土往外飞 */
+      if (p < 0.7) {
+        ctx.globalAlpha = 0.45 * (1 - p / 0.7);
+        ctx.fillStyle = LAST;
+        for (var i = 0; i < 4; i++) {
+          var a = Math.PI * (0.15 + i * 0.22), d = 8 + 16 * (p / 0.7);
+          ctx.beginPath(); ctx.arc(x + Math.cos(a) * d, y + 1 - Math.sin(a) * d * 0.5, 1.6, 0, 6.3); ctx.fill();
+        }
+      }
+    }
+    /** 插在地上的一把剑（阵的三个顶点）——和产品里那把同款，用来交代"阵还在" */
+    function sword(ctx, x, y, s, alpha) {
+      ctx.globalAlpha = alpha * 0.20; ctx.fillStyle = C;
+      ctx.beginPath(); ctx.ellipse(x, y + 1, 12 * s, 4.6 * s, 0, 0, 6.3); ctx.fill();
+      ctx.globalAlpha = alpha * 0.10; ctx.fillRect(x - 2.6 * s, y - 30 * s, 5.2 * s, 30 * s);
+      ctx.globalAlpha = alpha * 0.95;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 31 * s);
+      ctx.lineTo(x + 2.0 * s, y - 25 * s); ctx.lineTo(x + 2.0 * s, y - 9 * s);
+      ctx.lineTo(x - 2.0 * s, y - 9 * s); ctx.lineTo(x - 2.0 * s, y - 25 * s);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(207,233,255,.55)'; ctx.fill();
+      ctx.strokeStyle = '#eaf6ff'; ctx.lineWidth = 1.5 * s; ctx.stroke();
+      ctx.globalAlpha = alpha * 0.85; ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.9 * s;
+      ctx.beginPath(); ctx.moveTo(x, y - 30 * s); ctx.lineTo(x, y - 10 * s); ctx.stroke();
+      ctx.globalAlpha = alpha * 0.95; ctx.strokeStyle = '#eaf6ff'; ctx.lineWidth = 2.3 * s;
+      ctx.beginPath(); ctx.moveTo(x - 6.5 * s, y - 9 * s); ctx.lineTo(x + 6.5 * s, y - 9 * s); ctx.stroke();
+      ctx.lineWidth = 2.8 * s;
+      ctx.beginPath(); ctx.moveTo(x, y - 9 * s); ctx.lineTo(x, y); ctx.stroke();
+    }
+
+    /** 地刺式的叠加层：阵还在（残影）+ 剑刺波 + 被扎住的怪身上那点反馈 */
+    function overlay(ctx, g) {
+      var pv = g.pv, t = pv.tri.map(function (p) { return sc(g, p.x, p.y); });
+      var c = sc(g, pv.cx, pv.cy);
+      ctx.save();
+      /* 三角边框（残影，正在被土盖掉） */
+      ctx.globalAlpha = 0.30;
+      ctx.strokeStyle = C; ctx.lineWidth = 2.4;
+      ctx.beginPath();
+      ctx.moveTo(t[0].x, t[0].y); ctx.lineTo(t[1].x, t[1].y); ctx.lineTo(t[2].x, t[2].y);
+      ctx.closePath(); ctx.stroke();
+      /* 三个顶点的剑（阵的锚，收尾中） */
+      t.forEach(function (p) { sword(ctx, p.x, p.y, 1.0, 0.45); });
+      /* 剑刺：位置近的先画（后面的盖前面，层次更像一片地） */
+      var order = pv.pts.slice().sort(function (a, b) { return (a.y - b.y) || (a.x - b.x); });
+      order.forEach(function (p) {
+        var s = sc(g, p.x, p.y);
+        spike(ctx, s.x, s.y, p.p, p.lead);
+      });
+      /* 被扎住的怪：脚下一圈 + 放射火花 */
+      pv.hit.forEach(function (h) {
+        var s = sc(g, h.x, h.y);
+        ctx.globalAlpha = 0.30; ctx.strokeStyle = C; ctx.lineWidth = 1.8;
+        ctx.beginPath(); ctx.ellipse(s.x, s.y + 4, 17, 6.5, 0, 0, 6.3); ctx.stroke();
+        for (var i = 0; i < 7; i++) {
+          var a = i / 7 * 6.283 + 0.4, d1 = 13 + (i % 3) * 4;
+          ctx.globalAlpha = 0.80;
+          ctx.strokeStyle = i % 2 ? '#ffffff' : C; ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(s.x + Math.cos(a) * 5, s.y + Math.sin(a) * 5);
+          ctx.lineTo(s.x + Math.cos(a) * d1, s.y + Math.sin(a) * d1);
+          ctx.stroke();
+        }
+      });
+      ctx.restore();
+    }
+
+    /* ==================== 拼图 ==================== */
+    var variants = [
+      { id: 'A', label: 'A · 三边向内收拢（三股同时往里推）' },
+      { id: 'B', label: 'B · 单向横扫（左上 → 右下，像被犁过去）' },
+      { id: 'D', label: 'D · 阵眼爆开（中心先起，往外扩散）' }
+    ];
+    var moments = [
+      { wave: 0.30, label: '① 破土（波 25%）' },
+      { wave: 0.62, label: '② 过半 · 被围住的已被扎住（波 60%）' },
+      { wave: 1.05, label: '③ 出齐（波 100%）' }
+    ];
+    var CW = 240, CH = 180;                                    // 裁切尺寸（屏幕像素）
+    var crops = moments.map(function (m) {
+      var g = build('A', m.wave);
+      var p = sc(g, g.player.x, g.player.y);
+      return { x: Math.round(p.x - CW / 2), y: Math.round(p.y - CH / 2) };
+    });
+
+    var pad = 12, cellW = CW * Z, cellH = CH * Z, labH = 24, headH = 30;
+    var outW = pad + variants.length * (cellW + pad);
+    var outH = pad + headH + moments.length * (labH + cellH + pad);
+    var out = document.getElementById('out');
+    out.width = outW; out.height = outH;
+    var ctx = out.getContext('2d');
+    var FONT = '"PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = '#0d0f12'; ctx.fillRect(0, 0, outW, outH);
+
+    variants.forEach(function (ver, ci) {
+      ctx.fillStyle = '#cfe9a8'; ctx.font = '600 14px ' + FONT;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(ver.label, pad + ci * (cellW + pad), pad + 18);
+    });
+
+    moments.forEach(function (m, ri) {
+      var crop = crops[ri];
+      variants.forEach(function (ver, ci) {
+        var g = build(ver.id, m.wave);
+        var cv = render(g);
+        overlay(cv.getContext('2d'), g);
+        var x = pad + ci * (cellW + pad), y = pad + headH + ri * (labH + cellH + pad);
+        ctx.save();
+        ctx.fillStyle = '#9aa0a6'; ctx.font = '600 12px ' + FONT;
+        ctx.fillText(m.label, x, y + 15);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(cv, crop.x, crop.y, CW, CH, x, y + labH - 6, cellW, cellH);
+        ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + labH - 5.5, cellW - 1, cellH + 1);
+        ctx.restore();
+      });
+    });
+
+    document.title = 'READY ' + outW + 'x' + outH;
+  } catch (e) { document.title = 'ERR: ' + (e && e.message); }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>低血信号 · 现状对比（1+2+4）</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  低血三层反馈的验收图（2026-10 用户口径：血条挪到左上角之后"低血看不见"）：
+    上半 = 整屏 1:1 两格（看屏幕四边泛红的两档 + 左上卡里那条血条的红）
+    下半 = 角色放大 3.4x 四格（看"角色身上"那层信号，以及 2 的两种备选样式）
+      ① body 轻档（血 28%） ② body 重档（血 10%）
+      ③ ring 备选（脚下红圈）④ 狂热 + 低血同时（金圈在里面、红脉冲在外面，看会不会打架）
+  用法：bash tools/shot-boss.sh lowhp   → docs/lowhp-signals.png
+  ⚠️ 心跳是有相位的：这里把 t 固定在一个"脉冲接近最大"的时刻（0.1848s），
+     否则不同格子取到的相位不一样，看着像"有的格没画"。
+-->
+<canvas id="out" width="812" height="1120"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var W = 812, H = 375, CAP = 26;
+  var PHASE = 0.1848;                      // 心跳/泛红都取到接近峰值的一刻（见文件头说明）
+  var LH = (G.Config.feel && G.Config.feel.lowHp) || {};
+
+  function mkScene(hpFrac, setup) {
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(W, H);
+    g.state = 'play'; g.hint = '';
+    g.cam.x = 0; g.cam.y = 0;
+    var P = g.player;
+    P.x = 430; P.y = 210; P.face = 0; P.bob = 0; P.moving = false; P.dash = 0; P.frenzy = 0;
+    g.foes.length = 0;
+    for (var i = 0; i < 7; i++) {
+      var a = i / 7 * Math.PI * 2;
+      g.foes.push(G.Entities.makeFoe(G.Config, i % 3 === 0 ? 'tank' : 'slime',
+        P.x + Math.cos(a) * (120 + i * 14), P.y + Math.sin(a) * (80 + i * 10), 1, 1));
+    }
+    P.hp = P.stats.maxhp * hpFrac;
+    if (setup) setup(g, P);
+    return g;
+  }
+
+  var outCv = document.getElementById('out');
+  var ctx = outCv.getContext('2d');
+  outCv.width = W; outCv.height = 1090;
+  ctx = outCv.getContext('2d');
+  ctx.font = '600 13px "PingFang SC","Microsoft YaHei",monospace';
+
+  var off = document.createElement('canvas'); off.width = W; off.height = H;
+  function newR(ctx2, style) {
+    var r = new G.Renderer(ctx2, {
+      cfg: G.Config, lowHpStyle: style,
+      createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+    });
+    r.resize(W, H);
+    return r;
+  }
+  var rBody = newR(off.getContext('2d'), 'body');    // 整屏那两格：画进离屏，再整体贴上来
+  var rRing = newR(off.getContext('2d'), 'ring');
+  /* ⚠️ 放大格必须直接画在**输出**画布上：画进离屏画布而忘了 drawImage 回来，就是四格空白
+     （第一版就栽在这，出图才发现 —— 断言看不出这种事）。 */
+  var zBody = newR(ctx, 'body'), zRing = newR(ctx, 'ring');
+
+  function label(txt, x, y) {
+    ctx.fillStyle = '#cfe9a8';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(txt, x, y);
+  }
+
+  /* ---- 上半：整屏 1:1，看四边泛红的两档 ---- */
+  var fulls = [
+    { t: '① 低血轻档（血 28%）：屏幕四边淡淡泛红 + 左上卡血条描红 + 角色身上红色心跳', g: mkScene(0.28) },
+    { t: '② 低血重档（血 10%）：红边更深更快、往外铺更多 —— 余光也躲不掉', g: mkScene(0.10) }
+  ];
+  var y = 0;
+  for (var i = 0; i < fulls.length; i++) {
+    label(fulls[i].t, 6, y + CAP - 8);
+    var g = fulls[i].g, P = g.player;
+    rBody.lastT = PHASE; rBody.dt = 1 / 60; rBody.hpLag = P.hp / P.stats.maxhp;
+    rBody.draw(g, PHASE);
+    ctx.drawImage(off, 0, y + CAP);
+    ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, y + CAP + 0.5, W - 1, H - 1);
+    y += CAP + H;
+  }
+
+  /* ---- 下半：角色放大 3.4x 四格 ---- */
+  var CW = 203, CH = 210, Z = 3.4;
+  var zoomTop = y + 52;
+  label('角色身上那层信号（放大 3.4x）', 6, y + 22);
+
+  var cells = [
+    { t: '① body 轻档 28%', style: 'body', hp: 0.28, setup: null },
+    { t: '② body 重档 10%', style: 'body', hp: 0.10, setup: null },
+    { t: '③ ring 备选 10%', style: 'ring', hp: 0.10, setup: null },
+    { t: '④ 狂热(金)+低血(红)', style: 'body', hp: 0.10, setup: function (g, P) { P.frenzy = 3; } }
+  ];
+  for (var c = 0; c < cells.length; c++) {
+    var cx = c * CW, cy = zoomTop;
+    ctx.save();
+    ctx.fillStyle = '#3f6b33'; ctx.fillRect(cx, cy, CW - 1, CH);          // 和草地同色，看对比度
+    ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 1;
+    ctx.strokeRect(cx + 0.5, cy + 0.5, CW - 2, CH - 1);
+    ctx.fillStyle = '#cfe9a8'; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(cells[c].t, cx + 6, cy - 6);
+    var gg = mkScene(cells[c].hp, cells[c].setup), PP = gg.player;
+    var rr = cells[c].style === 'ring' ? zRing : zBody;
+    ctx.save();
+    /* 角色脚踩在格子下方 30px 处：含头顶的脉冲光晕都落在格子内 */
+    ctx.translate(cx + CW / 2, cy + CH - 30);
+    ctx.scale(Z, Z);
+    ctx.translate(-PP.x, -PP.y);
+    rr.lastT = PHASE;
+    rr.drawPlayer(PP, PHASE);
+    ctx.restore();
+    ctx.restore();
+  }
+
+  document.title = 'READY ' + outCv.width + 'x' + outCv.height;
+  } catch (e) {
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

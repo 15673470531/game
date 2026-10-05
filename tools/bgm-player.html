@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>砍到天亮 · BGM 试听（循环点检测）</title>
+<style>
+  body { background:#12151b; color:#dfe6ef; font:15px/1.7 -apple-system,"PingFang SC",sans-serif; padding:28px; max-width:820px; margin:0 auto; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  .sub { color:#8b98a8; font-size:13px; margin-bottom:22px; }
+  .card { background:#1a1f28; border:1px solid #272e3a; border-radius:10px; padding:16px 18px; margin-bottom:14px; }
+  .card h2 { font-size:15px; margin:0 0 10px; font-weight:600; }
+  .tip { color:#8b98a8; font-size:13px; margin-top:8px; }
+  audio { width:100%; }
+  b { color:#7fc4ff; }
+  code { background:#0e1218; padding:1px 5px; border-radius:4px; font-size:13px; }
+</style>
+</head>
+<body>
+<h1>砍到天亮 · BGM 小样</h1>
+<div class="sub">128 BPM · 16 小节 · 精确 30.000 秒 · A 小调（i–i–VI–VII）· 纯代码合成（Karplus-Strong 拨弦 + 加性锯齿 + 噪声打击）</div>
+
+<div class="card">
+  <h2>① 单遍循环（loop 打开 —— 重点听第 30 秒接回开头那一下）</h2>
+  <audio controls loop src="../docs/bgm/bgm-demo-30s.mp3"></audio>
+  <div class="tip">如果循环点听得出来，会表现为一个「咔哒」或节奏被绊一下。目标：听不出接缝在哪。</div>
+</div>
+
+<div class="card">
+  <h2>② 连播三遍（接缝出现两次，比 ① 更容易听出来）</h2>
+  <audio controls src="../docs/bgm/bgm-demo-30s-x3.mp3"></audio>
+  <div class="tip">音频本身的接缝在 <b>30s</b> 和 <b>60s</b> 处。浏览器播 mp3 可能自带一点点空隙，这个不代表游戏里也一样。</div>
+</div>
+
+<div class="card">
+  <h2>③ 无损版（wav，用来排除 mp3 编码的干扰）</h2>
+  <audio controls src="../docs/bgm/bgm-demo-30s.wav"></audio>
+  <div class="tip">wav 循环点绝对无缝。如果 ③ 听不出接缝而 ① 听出来了，那就是 mp3 编码的事，不是曲子的事。</div>
+</div>
+
+<div class="tip">
+  命令行听：<code>afplay /Users/guoqing/WeChatProjects/minigame-1/docs/bgm/bgm-demo-30s.mp3</code><br>
+  结构图（波形 + 频谱）：<code>docs/bgm/bgm-demo-30s-结构.png</code>
+</div>
+</body>
+</html>

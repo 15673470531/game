@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>升级面板 · 重刷按钮（方案 2：不限次数 + 递增价）</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  升级面板底部「重刷」按钮的对照图（2026-10 用户选**方案 2：不限次数 · 递增价**）。
+  五格对应：免费 → 30（预览"下次 60"）→ 90（越刷越贵）→ 钱不够置灰 → 封顶模式对照。
+
+  ⚠️ 画的是**真渲染器 + 真 game 对象**（Renderer.drawReroll 本身 + 真抽卡出来的那一排卡），
+     不是手绘示意：改了 core/config.js 的 reroll 或 renderer 的 drawReroll，重跑一次就是最新样子。
+  ⚠️ 2x 放大，方便逐字核（用户口径：\"你有自己看?\"——改渲染必须自己放大看）。
+
+  用法：bash tools/shot-boss.sh reroll      产出 docs/card-reroll.png
+-->
+<canvas id="out"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+    var G = window.__GAME__;
+    if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+
+    var W = 812, H = 375, ZOOM = 2;
+    /* 裁切范围：盖住三张卡 + 下面的重刷按钮（卡在 x77..735 / y115..276，按钮在 y293..335） */
+    var CROP = { x: 60, y: 96, w: 692, h: 262 };
+
+    /** 摆一个"刚升级、卡已弹出、已刷过 N 次"的局面，用真渲染器画一帧 */
+    function frame(st) {
+      var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+      g.setViewport(W, H);
+      g.updateSpawns = function () {}; g.spawnFoe = function () {};
+      g.foes = []; g.projectiles = []; g.hazards = []; g.pickups = [];
+      g.state = 'play';
+      g.player.gold = st.gold;
+      g.player.pendingLevels = 1;
+      g.openLevelUp();                       // 真抽卡（三张，和游戏里同一套逻辑）
+      g.cardGuard = 0;
+      g.player.rerolls = st.rerolls;         // 直接摆到"本局已刷过 N 次"的状态
+      var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      var r = new G.Renderer(cv.getContext('2d'), {
+        cfg: G.Config,
+        createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; }
+      });
+      r.resize(W, H);
+      r.draw(g, 1.0);
+      return cv;
+    }
+
+    var max0 = G.Config.growth.reroll.max;
+    var states = [
+      { label: '① 本局第 1 次 —— 免费：主字「重刷 · 免费」，副字「本局第一次免费」', gold: 200, rerolls: 0 },
+      { label: '② 第 2 次 —— 30 金币，副字预告「下次 60 金币」（把"越刷越贵"提前告诉玩家）', gold: 200, rerolls: 1 },
+      { label: '③ 第 4 次 —— 90 金币：不限次数，只要刷得起就能一直刷', gold: 500, rerolls: 3 },
+      { label: '④ 钱不够 —— 按钮置灰 +「金币不够（有 10）」：次数不拦，金币才是门槛', gold: 10, rerolls: 1 },
+      { label: '⑤ 对照：把 config 的 max 改回 3（旧规则）→ 面板自动切回「本局已刷满」', gold: 9999, rerolls: 3, cap: true }
+    ];
+
+    var stripH = CROP.h * ZOOM, labelH = 26, pad = 12;
+    var outW = CROP.w * ZOOM + pad * 2;
+    var outH = pad + states.length * (stripH + labelH + pad);
+    var out = document.getElementById('out');
+    out.width = outW; out.height = outH;
+    var ctx = out.getContext('2d');
+    var FONT = '"PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = '#0d0f12'; ctx.fillRect(0, 0, outW, outH);
+
+    states.forEach(function (s, i) {
+      G.Config.growth.reroll.max = s.cap ? 3 : max0;    // ⑤ 临时切到"封顶模式"做对照
+      var cv = frame(s);
+      var y = pad + i * (stripH + labelH + pad);
+      ctx.save();
+      ctx.fillStyle = '#cfe9a8';
+      ctx.font = '600 13px ' + FONT; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(s.label, pad, y + 14);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(cv, CROP.x, CROP.y, CROP.w, CROP.h, pad, y + labelH - 6, CROP.w * ZOOM, stripH);
+      ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 1;
+      ctx.strokeRect(pad + 0.5, y + labelH - 5.5, CROP.w * ZOOM - 1, stripH + 1);
+      ctx.restore();
+    });
+    G.Config.growth.reroll.max = max0;
+
+    document.title = 'READY ' + outW + 'x' + outH;
+  } catch (e) { document.title = 'ERR: ' + (e && e.message); }
+})();
+</script>
+</body>
+</html>

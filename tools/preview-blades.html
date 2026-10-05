@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>叠刃 · 画出来的刃数（2026-10）</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  「叠刃」（长剑 · 熟练度 Lv3 解锁）的**视觉**核对图。
+  五格：基线 1 把 → 叠刃 3 层 4 把 → 6 层 7 把 → 11 层 12 把（封顶）→ 千刃对照 6 把。
+
+  ⚠️ 为什么要有这张图：2026-10 玩家实测报"叠刃只有效果、视觉还是一把剑" ——
+     根因是**渲染层自己又算了一遍刃数**，核心层加了叠刃那一项、渲染层没跟上。
+     同一个坑历史上还有两次（开天的半径、千刃的刃数），三次都是靠出图才发现的。
+     现在渲染层改成只读 game.orbitParams()，这张图就是"画出来几把"的肉眼验收。
+  ⚠️ 2x 放大、裁到玩家附近，逐把数（用户口径："改渲染必须自己放大逐元素核"）。
+
+  用法：bash tools/shot-boss.sh blades      产出 docs/blade-count.png
+-->
+<canvas id="out"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+    var G = window.__GAME__;
+    if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+    var W = 812, H = 375, ZOOM = 2;
+    var PX = 1200, PY = 800;                     // 地图中间，相机不会被边界夹住
+
+    function frame(st) {
+      var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+      g.setViewport(W, H);
+      g.state = 'play';
+      g.updateSpawns = function () {}; g.spawnFoe = function () {};
+      g.foes.length = 0; g.projectiles.length = 0; g.hazards.length = 0; g.pickups.length = 0;
+      g.skillNotice = null;
+      g.player.x = PX; g.player.y = PY; g.player.hp = g.player.stats.maxhp;
+      g.player.orbOn = true; g.player.orbT = 1; g.player.orbAng = 0.6;   // 起转中，刀刃摊开
+      if (st.unity) {                            // 叠刃：直接摆到"已经涨了 N 层"
+        G.Progression.applyUpgrade(G.Config, g.player, 'bladeUnity');
+        g.player.bladeUnityStacks = st.unity;
+      }
+      if (st.burst) g.player.burst = st.burst;
+      g.updateCamera();
+      var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      var r = new G.Renderer(cv.getContext('2d'), {
+        cfg: G.Config,
+        createCanvas: function (w2, h2) { var c = document.createElement('canvas'); c.width = w2; c.height = h2; return c; }
+      });
+      r.resize(W, H);
+      r.draw(g, 0.016);
+      return { cv: cv, blades: g.orbitParams().blades };
+    }
+
+    var CROP = { x: 406 - 155, y: 187 - 105, w: 310, h: 200 };
+    var states = [
+      { label: '① 基线（没有叠刃）：1 把', unity: 0 },
+      { label: '② 叠刃 3 层：4 把', unity: 3 },
+      { label: '③ 叠刃 6 层：7 把', unity: 6 },
+      { label: '④ 叠刃 11 层封顶：12 把（再转也不涨了）', unity: 11 },
+      { label: '⑤ 对照 · 千刃（窗口内 6 把）—— 同一个根因的老坑', burst: { id: 'bladeStorm', name: '千刃', left: 2, active: true, bladesSet: 6, healed: 0 } }
+    ];
+
+    var stripH = CROP.h * ZOOM, labelH = 26, pad = 12;
+    var outW = CROP.w * ZOOM + pad * 2;
+    var outH = pad + states.length * (stripH + labelH + pad);
+    var out = document.getElementById('out');
+    out.width = outW; out.height = outH;
+    var ctx = out.getContext('2d');
+    var FONT = '"PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = '#0d0f12'; ctx.fillRect(0, 0, outW, outH);
+
+    states.forEach(function (s, i) {
+      var f = frame(s);
+      var y = pad + i * (stripH + labelH + pad);
+      ctx.save();
+      ctx.fillStyle = '#cfe9a8';
+      ctx.font = '600 13px ' + FONT; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(s.label + '　[orbitParams().blades = ' + f.blades + ']', pad, y + 14);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(f.cv, CROP.x, CROP.y, CROP.w, CROP.h, pad, y + labelH - 6, CROP.w * ZOOM, stripH);
+      ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 1;
+      ctx.strokeRect(pad + 0.5, y + labelH - 5.5, CROP.w * ZOOM - 1, stripH + 1);
+      ctx.restore();
+    });
+
+    document.title = 'READY ' + outW + 'x' + outH;
+  } catch (e) { document.title = 'ERR: ' + (e && e.message); }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>结算页 · 去掉常驻提示行 + 「输在哪」挪到标题下（2026-10）</title>
+<style>*{padding:0;margin:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  结算页那条提示行的两轮口径（2026-10 用户原话）：
+    ①「把下局目标去掉, 让他们排版更好一点」
+    ②「有 Boss 时的『还剩 X% 生命』—— 这条是真信息（"我输在哪"）」
+  ⇒ 常驻套话去掉；真信息留着，但**不占下面那四块排好的间距**，挂在"你倒下了"下面当一行小字。
+
+  那行原来（cy+94 的常驻行）有三种内容：
+    ① 无 Boss 时「下局目标：突破第 N 关」—— 用户点名的（试玩版只有一关，永远是同一句，
+       而且指的是"你刚卡住的那关"）→ **去掉**
+    ② 有 Boss 时「XX还剩 X% 生命」→ **保留**（挪到标题下）
+    ③ 兜底「换种搭配，再挑战一次」/ 榜单成绩 → 一起去掉（榜单现在关着，本版不出现）
+  两行 = 那行原来会显示的两种内容；两列 = 改前 / 改后。
+
+  ⚠️ 两列都是**真渲染器 + 真 game 对象**画的整页 1:1（812x375，不裁不缩）。
+     右列 = 现在的产品代码（`deathLostTo` 由核心层在死亡那一刻算好）；
+     左列 = 在预览页里复现改前那两笔（熟练度块 +13 回到旧的 cy+112 + 手绘 cy+94 那行，
+     字体/颜色/位置照旧代码逐字对齐）。只覆盖这两处，其余是同一份渲染器。
+  ⚠️ DEAD_TEXT_H = 132 没动 ⇒ 按钮一行没挪（是内部重排，不是加高）。
+
+  用法：bash tools/shot-boss.sh settle     产出 docs/settle-mastery-text.png
+-->
+<canvas id="out"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+    var G = window.__GAME__;
+    if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+    var W = 812, H = 375;
+    var FONT = '"PingFang SC","Microsoft YaHei",sans-serif';
+
+    function build(st) {
+      var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+      g.setViewport(W, H);
+      var kind = st.kind || 'sword';
+      var w = G.Progression.makeDefaultWeapon(G.Config);
+      w.kind = kind; w.id = 'w-' + kind; w.name = G.Config.weapons[kind].name;
+      g.player.equip.weapon = w; g.player.bag = [w];
+      g.player.mastery = {}; g.player.masteryGainRun = {};
+      g.player.mastery[kind] = st.pts;
+      if (st.gain) g.player.masteryGainRun[kind] = st.gain;
+      /* 让这一页看起来像真的一局结束：等级 / 击杀 / 波次 / 金币 */
+      g.player.level = 7; g.player.kills = 63; g.player.runGold = 86; g.player.gold = 86;
+      g.wave = 3;
+      g.state = 'dead';
+      return g;
+    }
+
+    var OLD_BLOCK_DY = 13;      // 改前熟练度块在 cy+112，现在（无 Boss 时）是 cy+99
+
+    function frame(st, old) {
+      var g = build(st);
+      /* 改前那一列不设 deathLostTo（那时它在那行常驻位、由下面手工复现）；
+         改后这一列走产品代码：核心层算好的"输在哪" */
+      g.deathLostTo = old ? null : st.lost;
+      var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      var r = new G.Renderer(cv.getContext('2d'), {
+        cfg: G.Config,
+        createCanvas: function (w2, h2) { var c = document.createElement('canvas'); c.width = w2; c.height = h2; return c; }
+      });
+      r.resize(W, H);
+      if (old) {
+        var origBlock = r.drawMasteryBlock;
+        r.drawMasteryBlock = function (c2, gm, mi, cxx, y) {
+          return origBlock.call(this, c2, gm, mi, cxx, y + OLD_BLOCK_DY);
+        };
+        var origDraw = r.drawGameOver;
+        r.drawGameOver = function (gm) {
+          origDraw.call(this, gm);
+          var c2 = this.ctx, top = gm.deadRects().textTop;
+          c2.save();
+          c2.textAlign = 'center'; c2.textBaseline = 'middle';
+          c2.fillStyle = '#ffd166'; c2.font = '12px ' + FONT;
+          c2.fillText(st.oldGoal, this.w / 2, top + 94);
+          c2.restore();
+        };
+      }
+      r.draw(g, 1.0);
+      return cv;
+    }
+
+    var states = [
+      { label: '① 死时场上没有 Boss —— 改前那行是常驻的「下局目标：突破第 1 关」（已去掉、也不再占位）',
+        pts: 150, gain: 150, oldGoal: '下局目标：突破第 1 关', lost: null },
+      { label: '② 死时 Boss 还活着 —— 「还剩 X% 生命」留下来，挪到标题下面当小字',
+        pts: 150, gain: 150, oldGoal: '铁甲母蟹还剩 40% 生命', lost: '铁甲母蟹还剩 40% 生命' }
+    ];
+    var cols = [
+      { label: '改前（常驻行在下面 + 熟练度块贴着分隔线）', old: true },
+      { label: '改后（套话去掉；「输在哪」挂标题下；四块间距排匀）', old: false }
+    ];
+
+    var labH = 22, headH = 26, pad = 12;
+    var outW = pad + cols.length * (W + pad);
+    var outH = pad + headH + states.length * (labH + H + pad);
+    var out = document.getElementById('out');
+    out.width = outW; out.height = outH;
+    var ctx = out.getContext('2d');
+    ctx.fillStyle = '#0d0f12'; ctx.fillRect(0, 0, outW, outH);
+
+    cols.forEach(function (c, ci) {
+      ctx.fillStyle = '#cfe9a8'; ctx.font = '600 14px ' + FONT;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(c.label, pad + ci * (W + pad), pad + 18);
+    });
+
+    states.forEach(function (s, ri) {
+      var y = pad + headH + ri * (labH + H + pad);
+      ctx.fillStyle = '#9aa0a6'; ctx.font = '600 12px ' + FONT;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(s.label, pad, y + 15);
+      cols.forEach(function (c, ci) {
+        var cv = frame(s, c.old);
+        var x = pad + ci * (W + pad);
+        ctx.drawImage(cv, x, y + labH, W, H);
+        ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + labH + 0.5, W - 1, H - 1);
+      });
+    });
+
+    document.title = 'READY ' + outW + 'x' + outH;
+  } catch (e) { document.title = 'ERR: ' + (e && e.message); }
+})();
+</script>
+</body>
+</html>

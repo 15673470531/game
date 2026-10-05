@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>武器图鉴（2026-10）</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  武器图鉴的 1:1 对照图（2026-10）。四格：
+    ① 首页底部按钮排：新增第 4 个「武器图鉴」（游戏介绍 / 玩法说明 / 开局武器 / 武器图鉴）
+    ② 图鉴 A 版（上下两块）· 长剑 —— 3 张技能都要在框里（这是原来局内页画出去的那张）
+    ③ 图鉴 A 版（上下两块）· 双刀 —— 只有 2 张技能（卡片变宽）+ 熟练度内容还没配 → 留白
+    ④ 图鉴 B 版（左右两块）· 长剑 —— 技能竖列表 + 熟练度竖列表（挑版式用）
+
+  ⚠️ 画的是**真渲染器 + 真 game 对象**（Renderer.drawCodex 本身），不是手绘示意：
+     改了 config.mastery / weaponSkillRows / drawCodex，重跑一次就是最新样子。
+  ⚠️ 1:1 不放大（812x375 就是真机横屏尺寸），要逐字核可以放大看这张图。
+
+  用法：bash tools/shot-boss.sh codex      产出 docs/codex.png
+-->
+<canvas id="out"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+    var G = window.__GAME__;
+    if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+    var W = 812, H = 375;
+
+    function build(o) {
+      var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+      g.setViewport(W, H);
+      var w = G.Progression.makeDefaultWeapon(G.Config);
+      w.kind = 'sword'; w.id = 'w-sword'; w.name = G.Config.weapons.sword.name;
+      g.player.equip.weapon = w;
+      g.player.bag = [w];
+      g.player.mastery = { sword: 450 };          // 长剑 Lv2 中段：450 / 600
+      g.player.masteryGainRun = {};
+      g.player.taken = {};
+      if (o.taken) for (var k in o.taken) g.player.taken[k] = 1;
+      g.state = 'title';
+      if (o.codex) { g.codexOpen = true; g.codexKind = o.kind || 'sword'; g.codexStyle = o.style || 'A'; }
+      return g;
+    }
+
+    function frame(o) {
+      var g = build(o);
+      var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      var r = new G.Renderer(cv.getContext('2d'), {
+        cfg: G.Config,
+        createCanvas: function (w2, h2) { var c = document.createElement('canvas'); c.width = w2; c.height = h2; return c; }
+      });
+      r.resize(W, H);
+      r.draw(g, 1.0);
+      return cv;
+    }
+
+    var shots = [
+      { label: '① 首页底部按钮排：新增第 4 个「武器图鉴」', o: {} },
+      { label: '② 图鉴 A 版（上下两块）· 长剑 —— 3 张技能都要在框内（第三张就是原来画出去的那张）',
+        o: { codex: true, style: 'A', kind: 'sword', taken: { sword_wave: 1 } } },
+      { label: '③ 图鉴 A 版 · 双刀 —— 2 张技能（卡片自然变宽）＋ 熟练度内容还没配 → 留白',
+        o: { codex: true, style: 'A', kind: 'dagger' } },
+      { label: '④ 图鉴 B 版（左右两块）· 长剑 —— 技能竖列表 + 熟练度竖列表',
+        o: { codex: true, style: 'B', kind: 'sword', taken: { sword_wave: 1, sword_return: 1 } } },
+      { label: '⑤ 图鉴 A 版 · 法杖（看另一把武器切过去是什么样）',
+        o: { codex: true, style: 'A', kind: 'staff' } }
+    ];
+
+    var pad = 14, labelH = 24, cols = 2;
+    var rows = Math.ceil(shots.length / cols);
+    var outW = pad + cols * (W + pad);
+    var outH = pad + rows * (H + labelH + pad);
+    var out = document.getElementById('out');
+    out.width = outW; out.height = outH;
+    var ctx = out.getContext('2d');
+    var FONT = '"PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = '#0d0f12'; ctx.fillRect(0, 0, outW, outH);
+
+    shots.forEach(function (s, i) {
+      var cv = frame(s.o);
+      var cx = pad + (i % cols) * (W + pad);
+      var cy = pad + Math.floor(i / cols) * (H + labelH + pad);
+      ctx.fillStyle = '#cfe9a8';
+      ctx.font = '600 13px ' + FONT; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(s.label, cx, cy + 15);
+      ctx.drawImage(cv, cx, cy + labelH);
+      ctx.strokeStyle = 'rgba(255,255,255,.16)'; ctx.lineWidth = 1;
+      ctx.strokeRect(cx + 0.5, cy + labelH + 0.5, W - 1, H - 1);
+    });
+
+    document.title = 'READY ' + outW + 'x' + outH;
+  } catch (e) { document.title = 'ERR: ' + (e && e.message); }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>剑阵回响 · 视觉三版对照（2026-10）</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  「剑阵回响」视觉升级的**三版对照图**（用户在真机上觉得现在这版不够帅）。
+  三列 = 三版，三行 = 三个瞬间（布阵中 / 预警 / 齐斩）：
+
+    第 1 列 V0 现状：**真的走产品渲染器**（renderer 的 drawWeaponSkills 自己画的），不是重画
+    第 2 列 V1 克制版：剑有实体感 + 三角连成 + 内部淡阵纹 + 锥形刀光 + 命中点粒子
+    第 3 列 V2 更响版：剑更大更亮 + 落地扬尘 + 阵纹更密 + 更长的三层刀光 + 顶点碎刃 + 冲击痕
+
+  ⚠️ V1 / V2 是**预览页里的原型**（还没进产品代码）—— 因为这两版本来就是要"先看图再定"的东西，
+     写进产品再删反而更乱。底层场景（世界/角色/怪）三列完全一样，只有技能表现不同，
+     这样对比才公平。坐标换算用的是渲染器自己那套：(world − cam) × zoom（见 renderer.draw 里的
+     translate(ox,oy)→scale(zoom)→translate(-cam.x,-cam.y)，ox/oy 是屏震、这里为 0）。
+
+  用法：bash tools/shot-boss.sh echo2      产出 docs/sword-echo-variants.png
+-->
+<canvas id="out"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+    var G = window.__GAME__;
+    if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+    var W = 812, H = 375, Z = 2, C = G.Config.swordEcho.color;
+    var PX = 1200, PY = 800;
+    /* 三把剑的世界坐标（相对玩家）——和产品预览图里那组一致，方便对照 */
+    var TRI = [[-90, -70], [110, -54], [10, 96]];
+    var TWO = [[-90, -70], [110, -54]];
+    /* 阵里的怪（世界坐标，相对玩家）。前四只在三角**内**、最后一只在三角**外**
+       —— 外面那只用来核"只有阵里的才中"（对齐是我自己算的，所以这里必须真的判一下，
+          别摆个"看起来在里面"的位置就当它中了）。 */
+    var FOES = [[-20, -10], [40, -20], [0, 40], [-25, 10], [140, 60]];
+    /** 点是否在三角形内（和产品代码里的判定同一个算法） */
+    function inTri(px, py, t) {
+      function side(a, b) { return (b.x - a.x) * (py - a.y) - (b.y - a.y) * (px - a.x); }
+      var s1 = side(t[0], t[1]), s2 = side(t[1], t[2]), s3 = side(t[2], t[0]);
+      return !(((s1 < 0) || (s2 < 0) || (s3 < 0)) && ((s1 > 0) || (s2 > 0) || (s3 > 0)));
+    }
+
+    /* ==================== 场景（三列共用） ==================== */
+    function build(moment) {
+      var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+      g.setViewport(W, H);
+      g.state = 'play';
+      g.updateSpawns = function () {}; g.spawnFoe = function () {};
+      g.foes.length = 0; g.projectiles.length = 0; g.hazards.length = 0; g.pickups.length = 0;
+      g.skillNotice = null;
+      g.player.x = PX; g.player.y = PY; g.player.hp = g.player.stats.maxhp;
+      g.player.orbOn = false; g.player.orbT = 0.3;
+      FOES.forEach(function (p) {
+        var f = G.Entities.makeFoe(G.Config, 'slime', PX + p[0], PY + p[1], 1, 1);
+        f.hp = f.maxhp * 0.72; g.foes.push(f);
+      });
+      var tri = TRI.map(function (p) { return { x: PX + p[0], y: PY + p[1] }; });
+      var cx = (tri[0].x + tri[1].x + tri[2].x) / 3, cy = (tri[0].y + tri[1].y + tri[2].y) / 3;
+      /* 真实技能状态（给 V0 那列的产品渲染器用） */
+      if (moment === 'deploy') {
+        g.skillEchoSwords = TWO.map(function (p) { return { x: PX + p[0], y: PY + p[1] }; });
+      } else if (moment === 'warn') {
+        g.skillEchoStrike = { tri: tri, cx: cx, cy: cy, warn: G.Config.swordEcho.warn * 0.45, slashed: false, hold: 0 };
+      } else {
+        /* 齐斩：走**产品真实路径**（三把剑到齐 → echoArmStrike → 预警走完 → echoSlash）。
+           ⚠️ 早前这里是手摆一个 slashed=true 的 strike（没有 hits 字段），
+              产品那格因此永远不画命中火花/冲击痕 —— 对比图看着像"落地版少了东西"，
+              其实是预览页没喂数据。改走真路径后 strike.hits 才有值。
+           ⚠️ 顺序不能反：先 updateWeaponSkills 热身（第一次调用会把 skillActiveKind
+              从 null 落到 'sword'，那一下会清场），再摆三把剑。 */
+        g.grantSkill('sword_echo'); g.skillNotice = null;
+        g.updateWeaponSkills(0.001);
+        g.skillEchoSwords = TRI.map(function (p) { return { x: PX + p[0], y: PY + p[1] }; });
+        g.echoArmStrike();
+        if (g.skillEchoStrike) {
+          g.skillEchoStrike.warn = 0.001;
+          g.updateSwordEcho(0.001);          // 走完预警 → 进波（wave=0）
+          g.updateSwordEcho(0.13);           // 再推一段：波约 40%，刺才冒得出来
+        }
+      }
+      g.echoGeom = { tri: tri, cx: cx, cy: cy };
+      g.updateCamera();
+      return g;
+    }
+
+    function render(g) {
+      var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      var r = new G.Renderer(cv.getContext('2d'), {
+        cfg: G.Config,
+        createCanvas: function (w2, h2) { var c = document.createElement('canvas'); c.width = w2; c.height = h2; return c; }
+      });
+      r.resize(W, H);
+      r.draw(g, 0.016);
+      return cv;
+    }
+    /** 世界 → 屏幕（和渲染器同一套） */
+    function sc(g, wx, wy) {
+      var z = (G.Config.camera && G.Config.camera.zoom) || 1;
+      return { x: (wx - g.cam.x) * z, y: (wy - g.cam.y) * z };
+    }
+
+    /* ==================== V1 / V2 原型画法 ==================== */
+    /** 插在地上的一把剑（具象：剑身 + 中脊高光 + 护手 + 柄；不是三条线段） */
+    function sword(ctx, x, y, s, alpha, glow) {
+      ctx.save();
+      if (glow) { ctx.shadowColor = C; ctx.shadowBlur = 10 * s; }
+      ctx.globalAlpha = alpha * 0.20;                 // 地面微光
+      ctx.fillStyle = C;
+      ctx.beginPath(); ctx.ellipse(x, y + 1, 12 * s, 4.6 * s, 0, 0, 6.3); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.globalAlpha = alpha * 0.10;                 // 竖直虚影：它是"虚"剑
+      ctx.fillStyle = C;
+      ctx.fillRect(x - 2.6 * s, y - 30 * s, 5.2 * s, 30 * s);
+      /* 剑身（细长，头略收） */
+      ctx.globalAlpha = alpha * 0.95;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 31 * s);
+      ctx.lineTo(x + 2.0 * s, y - 25 * s);
+      ctx.lineTo(x + 2.0 * s, y - 9 * s);
+      ctx.lineTo(x - 2.0 * s, y - 9 * s);
+      ctx.lineTo(x - 2.0 * s, y - 25 * s);
+      ctx.closePath();
+      ctx.fillStyle = 'rgba(207,233,255,.55)'; ctx.fill();
+      ctx.strokeStyle = '#eaf6ff'; ctx.lineWidth = 1.5 * s; ctx.stroke();
+      ctx.globalAlpha = alpha * 0.85;                 // 中脊高光
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 0.9 * s;
+      ctx.beginPath(); ctx.moveTo(x, y - 30 * s); ctx.lineTo(x, y - 10 * s); ctx.stroke();
+      ctx.globalAlpha = alpha * 0.95;
+      ctx.strokeStyle = '#eaf6ff'; ctx.lineWidth = 2.3 * s;   // 护手
+      ctx.beginPath(); ctx.moveTo(x - 6.5 * s, y - 9 * s); ctx.lineTo(x + 6.5 * s, y - 9 * s); ctx.stroke();
+      ctx.lineWidth = 2.8 * s;                        // 柄
+      ctx.beginPath(); ctx.moveTo(x, y - 9 * s); ctx.lineTo(x, y); ctx.stroke();
+      ctx.restore();
+    }
+    /** 三角内部的阵纹（斜线）：让人看出"这块地是我的阵" */
+    function hatch(ctx, tri, alpha, step) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(tri[0].x, tri[0].y); ctx.lineTo(tri[1].x, tri[1].y); ctx.lineTo(tri[2].x, tri[2].y);
+      ctx.closePath(); ctx.clip();
+      ctx.globalAlpha = alpha; ctx.strokeStyle = C; ctx.lineWidth = 1;
+      var minX = Math.min(tri[0].x, tri[1].x, tri[2].x), maxX = Math.max(tri[0].x, tri[1].x, tri[2].x);
+      var minY = Math.min(tri[0].y, tri[1].y, tri[2].y), maxY = Math.max(tri[0].y, tri[1].y, tri[2].y);
+      for (var d = (minX - maxY); d < (maxX - minY); d += step) {
+        ctx.beginPath();
+        ctx.moveTo(d + minY, minY); ctx.lineTo(d + maxY, maxY);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+    function triPath(ctx, tri) {
+      ctx.beginPath();
+      ctx.moveTo(tri[0].x, tri[0].y); ctx.lineTo(tri[1].x, tri[1].y); ctx.lineTo(tri[2].x, tri[2].y);
+      ctx.closePath();
+    }
+    /** 锥形刀光：从顶点 a 扫向中心 b，起宽 w，尾尖 —— 读起来是"斩进去" */
+    function bladeLight(ctx, ax, ay, bx, by, w, alpha) {
+      var dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy) || 1;
+      var nx = -dy / L, ny = dx / L;
+      ctx.globalAlpha = alpha * 0.30; ctx.fillStyle = C;      // 外焰
+      ctx.beginPath();
+      ctx.moveTo(ax + nx * w, ay + ny * w); ctx.lineTo(bx, by); ctx.lineTo(ax - nx * w, ay - ny * w);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = alpha * 0.95; ctx.fillStyle = '#ffffff';   // 白芯
+      ctx.beginPath();
+      ctx.moveTo(ax + nx * w * 0.30, ay + ny * w * 0.30); ctx.lineTo(bx, by);
+      ctx.lineTo(ax - nx * w * 0.30, ay - ny * w * 0.30);
+      ctx.closePath(); ctx.fill();
+    }
+    /** 命中点粒子（挨打的怪身上，不是屏幕中心爆一团）。
+        ⚠️ 只给**三角里**的怪 —— 这张图有一半是说清"外面的不中"，画上去就自相矛盾了。 */
+    function hitSparks(ctx, g, big) {
+      var t = g.echoGeom.tri;
+      g.foes.forEach(function (f) {
+        if (!inTri(f.x, f.y, t)) return;
+        var p = sc(g, f.x, f.y);
+        var n = big ? 9 : 6;
+        for (var i = 0; i < n; i++) {
+          var a = i / n * 6.283 + (big ? 0.4 : 0);
+          var d = (big ? 16 : 11) + (i % 3) * 3;
+          ctx.globalAlpha = big ? 0.85 : 0.6;
+          ctx.strokeStyle = i % 2 ? '#ffffff' : C;
+          ctx.lineWidth = big ? 2.2 : 1.6;
+          ctx.beginPath();
+          ctx.moveTo(p.x + Math.cos(a) * 5, p.y + Math.sin(a) * 5);
+          ctx.lineTo(p.x + Math.cos(a) * d, p.y + Math.sin(a) * d);
+          ctx.stroke();
+        }
+        if (big) {                                            // 地上留一圈小冲击痕
+          ctx.globalAlpha = 0.28; ctx.strokeStyle = C; ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.ellipse(p.x, p.y + 6, 17, 6.5, 0, 0, 6.3); ctx.stroke();
+        }
+      });
+    }
+    /** 顶点爆碎刃（更响版） */
+    function shardBurst(ctx, x, y) {
+      for (var i = 0; i < 8; i++) {
+        var a = i / 8 * 6.283 + 0.3, d0 = 6, d1 = 16 + (i % 3) * 5;
+        ctx.globalAlpha = 0.75; ctx.strokeStyle = i % 2 ? '#ffffff' : C; ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(x + Math.cos(a) * d0, y + Math.sin(a) * d0);
+        ctx.lineTo(x + Math.cos(a) * d1, y + Math.sin(a) * d1);
+        ctx.stroke();
+      }
+    }
+    /** 落地扬尘（更响版） */
+    function dust(ctx, x, y) {
+      for (var i = 0; i < 6; i++) {
+        var a = i / 6 * 6.283;
+        ctx.globalAlpha = 0.30; ctx.fillStyle = '#e8f3d8';
+        ctx.beginPath();
+        ctx.arc(x + Math.cos(a) * 13, y + 1 + Math.sin(a) * 5, 2.1, 0, 6.3);
+        ctx.fill();
+      }
+    }
+
+    /** 三版各自的叠加层（v0 = 什么都不画，用产品渲染器的结果） */
+    function overlay(ctx, g, version, moment) {
+      if (version === 0) return;
+      var tri = g.echoGeom.tri, cx = g.echoGeom.cx, cy = g.echoGeom.cy;
+      var s = version === 2 ? 1.25 : 1.0;
+      var t = tri.map(function (p) { return sc(g, p.x, p.y); });
+      var c = sc(g, cx, cy);
+      var swords = (moment === 'deploy') ? t.slice(0, 2) : t;
+
+      ctx.save();
+      if (moment === 'deploy') {
+        swords.forEach(function (p, i) { sword(ctx, p.x, p.y, s, 1, false); if (version === 2) dust(ctx, p.x, p.y); });
+      } else if (moment === 'warn') {
+        hatch(ctx, t, version === 2 ? 0.13 : 0.07, version === 2 ? 10 : 15);
+        ctx.globalAlpha = version === 2 ? 0.80 : 0.55;
+        ctx.strokeStyle = C; ctx.lineWidth = version === 2 ? 2.8 : 2.2;
+        triPath(ctx, t); ctx.stroke();
+        if (version === 2) {                                   // 边框上的短刺：阵在"转"
+          ctx.globalAlpha = 0.55; ctx.lineWidth = 1.6;
+          for (var e = 0; e < 3; e++) {
+            var a = t[e], b = t[(e + 1) % 3];
+            for (var k = 0.14; k < 1; k += 0.14) {
+              var px = a.x + (b.x - a.x) * k, py = a.y + (b.y - a.y) * k;
+              var mx = cx - px, my = cy - py, L = Math.hypot(mx, my) || 1;
+              ctx.beginPath();
+              ctx.moveTo(px, py); ctx.lineTo(px + mx / L * 8, py + my / L * 8);
+              ctx.stroke();
+            }
+          }
+        }
+        swords.forEach(function (p, i) { sword(ctx, p.x, p.y, s, 1, true); if (version === 2) shardBurst(ctx, p.x, p.y - 18); });
+      } else {
+        /* 齐斩：三把剑的残影 + 锥形刀光 + 命中粒子 */
+        swords.forEach(function (p) { sword(ctx, p.x, p.y, s, version === 2 ? 0.45 : 0.30, false); });
+        t.forEach(function (p, i) {
+          if (version === 2) {                                 // 更响版：刀光越过中心、多一层薄光晕
+            var ax = p.x + (p.x - c.x) * 0.12, ay = p.y + (p.y - c.y) * 0.12;
+            var bx = c.x + (c.x - p.x) * 0.14, by = c.y + (c.y - p.y) * 0.14;
+            ctx.save(); ctx.globalAlpha = 0.18;
+            bladeLight(ctx, ax, ay, bx, by, 17, 0.55); ctx.restore();
+            bladeLight(ctx, ax, ay, bx, by, 15, 1);
+          } else {
+            bladeLight(ctx, p.x, p.y, c.x, c.y, 11, 1);
+          }
+        });
+        if (version === 2) {                                   // 交汇点的大光斑
+          ctx.globalAlpha = 0.22; ctx.fillStyle = C;
+          ctx.beginPath(); ctx.arc(c.x, c.y, 26, 0, 6.3); ctx.fill();
+          ctx.globalAlpha = 0.95; ctx.fillStyle = '#ffffff';
+          ctx.beginPath(); ctx.arc(c.x, c.y, 7, 0, 6.3); ctx.fill();
+        }
+        hitSparks(ctx, g, version === 2);
+      }
+      ctx.restore();
+    }
+
+    /* ==================== 拼图 ==================== */
+    var moments = [
+      { id: 'deploy', label: '① 布阵中（地上两把虚剑）' },
+      { id: 'warn', label: '② 预警（三角连成，0.35s）' },
+      { id: 'slash', label: '③ 齐斩（三剑向内斩一次）' }
+    ];
+    var versions = [
+      { v: 0, label: 'V0 · 现状（产品渲染器真画的）' },
+      { v: 1, label: 'V1 · 克制版（剑有形 + 阵纹 + 锥形刀光 + 命中点粒子）' },
+      { v: 2, label: 'V2 · 更响版（更大更亮 + 扬尘 + 长刀光 + 碎刃 + 冲击痕）' }
+    ];
+    var CW = 300, CH = 220;                                    // 裁切尺寸（屏幕像素）
+
+    /* 先把三行各自的裁切框算出来（同一行三版必须用同一个框，对比才公平） */
+    var crops = moments.map(function (m) {
+      var g = build(m.id);
+      var p = sc(g, g.player.x, g.player.y);
+      return { x: Math.round(p.x - CW / 2), y: Math.round(p.y - CH / 2) };
+    });
+
+    var pad = 12, cellW = CW * Z, cellH = CH * Z, labH = 24, headH = 30;
+    var outW = pad + versions.length * (cellW + pad);
+    var outH = pad + headH + moments.length * (labH + cellH + pad);
+    var out = document.getElementById('out');
+    out.width = outW; out.height = outH;
+    var ctx = out.getContext('2d');
+    var FONT = '"PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = '#0d0f12'; ctx.fillRect(0, 0, outW, outH);
+
+    versions.forEach(function (ver, ci) {
+      ctx.fillStyle = '#cfe9a8'; ctx.font = '600 14px ' + FONT;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(ver.label, pad + ci * (cellW + pad), pad + 18);
+    });
+
+    moments.forEach(function (m, ri) {
+      var crop = crops[ri];
+      versions.forEach(function (ver, ci) {
+        var g = build(m.id);
+        if (ver.v !== 0) { g.skillEchoSwords = []; g.skillEchoStrike = null; g.skillVisuals = []; }
+        var cv = render(g);
+        var octx = cv.getContext('2d');
+        overlay(octx, g, ver.v, m.id);
+        var x = pad + ci * (cellW + pad), y = pad + headH + ri * (labH + cellH + pad);
+        ctx.save();
+        ctx.fillStyle = '#9aa0a6'; ctx.font = '600 12px ' + FONT;
+        ctx.fillText(m.label, x, y + 15);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(cv, crop.x, crop.y, CW, CH, x, y + labH - 6, cellW, cellH);
+        ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + labH - 5.5, cellW - 1, cellH + 1);
+        ctx.restore();
+      });
+    });
+
+    document.title = 'READY ' + outW + 'x' + outH;
+  } catch (e) { document.title = 'ERR: ' + (e && e.message); }
+})();
+</script>
+</body>
+</html>

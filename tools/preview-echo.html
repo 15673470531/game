@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>剑阵回响 · 三态（2026-10）</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  剑阵回响（长剑 · 熟练度 Lv2 解锁）的对照图。用户设计原话："走过的路，变成你的杀招"。
+  三格：
+    ① 布阵中：地上 2 把虚剑（每完成一次普通攻击落一把，落在当时的脚下）
+    ② 预警：第三把到齐 → 三角连成 → 边框随倒计时收紧变亮（0.35s）
+    ③ 剑刺波：三边同时向内炸起剑刺（用户选的 A 编排），把被围住的怪从下往上穿透
+
+  ⚠️ 画的是**真渲染器 + 真 game 对象**（Renderer.drawWeaponSkills 本身，三角/虚剑的几何都是
+     产品代码 echoArmStrike 算出来的），不是手绘示意 —— 所以这张图 = 真机画面。
+  ⚠️ 视觉口径（2026-10 第 2 版，用户在 V1/V2 对照图里选了 **V2**）：技能是**事件**，
+     可以比脚下的常驻指示器（充能环）响；但响 ≠ 抽象 —— 真剑形 + 地面阵纹 + 锥形刀光 + 火花 + 扬尘，
+     全是具象的东西，没有光带、没有实心大块。
+     V1 状态：细线剑身 + 细三角框 + 三道直线（用户真机反馈"不是很有视觉感、不是很帅"）→ 已换掉。
+     所以这里裁到玩家附近 2x 放大，逐元素核（用户口径："改渲染必须自己放大看"）。
+  ⚠️ 三角最大范围 maxR=170px：第三格故意把三把剑摆得比较开，看有没有被压回上限。
+
+  用法：bash tools/shot-boss.sh echo      产出 docs/sword-echo.png
+-->
+<canvas id="out"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+    var G = window.__GAME__;
+    if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+    var W = 812, H = 375, ZOOM = 2;
+
+    /* 场上摆一个"能看懂在打什么"的小场面：玩家 + 一圈怪。
+       坐标都在世界系里，玩家固定在视野中心，所以裁切可以按屏幕中心来定。 */
+    function scene() {
+      var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+      g.setViewport(W, H);
+      g.state = 'play';
+      g.updateSpawns = function () {}; g.spawnFoe = function () {};
+      g.foes.length = 0; g.projectiles.length = 0; g.hazards.length = 0; g.pickups.length = 0;
+      g.player.x = 1200; g.player.y = 800; g.player.hp = g.player.stats.maxhp;
+      g.grantSkill('sword_echo');
+      /* ⚠️ 清掉"获得 · XX"那条全屏横幅：预览要的是"布阵"本身，横幅会盖住画面中间
+         （第一版没清，三格全被横幅挡了一半）。 */
+      g.skillNotice = null;
+      g.updateWeaponSkills(0.001);            // 让 skillActiveKind 落到长剑上（别让它把摆好的阵清掉）
+      /* 怪的位置是**相对三角**排的：3 只在三角里（挨斩 → 冒火花/留冲击痕）、3 只在阵外
+         （用来核"外面的不中"）。三角顶点见下面 frame() 里的三把剑。 */
+      var at = [[-150, -80], [160, -60], [10, 150], [-20, 20], [60, 0], [10, 50]];
+      at.forEach(function (p) {
+        var f = G.Entities.makeFoe(G.Config, 'slime', g.player.x + p[0], g.player.y + p[1], 1, 1);
+        f.hp = f.maxhp;
+        g.foes.push(f);
+      });
+      return g;
+    }
+    var P = { x: 1200, y: 800 };
+
+    function frame(kind, dt) {
+      var g = scene();
+      if (kind === 'deploy') {
+        /* ① 布阵中：地上 2 把（落在"刚才打完那两刀"的位置 —— 一个在脚后、一个在侧前）。
+           t 是落地计时：老的那把早落稳了（不再冒扬尘），新的那把刚插下去（扬尘 + 涟漪）。
+           这就是真实对局里同时存在两把剑时的样子。 */
+        g.skillEchoSwords = [{ x: P.x - 46, y: P.y + 24, t: 0.6 }, { x: P.x + 54, y: P.y + 6, t: 0.02 }];
+      } else if (kind === 'warn') {
+        /* ② 预警：第三把到齐。摆得比较开，看 maxR 有没有把三角压回上限 */
+        g.player.orbOn = false; g.player.orbT = 0.3;   // 收刃中（充能环也在，顺便核一下同屏）
+        g.echoDropSword(P.x - 90, P.y - 70);
+        g.echoDropSword(P.x + 110, P.y - 54);
+        g.echoDropSword(P.x + 10, P.y + 96);
+        g.skillEchoStrike.warn = G.Config.swordEcho.warn * 0.45;   // 预警过半的样子
+      } else if (kind === 'slash') {
+        /* ③ 剑刺波（2026-10 第 3 版攻击表现，用户选了 A 编排：三边向内收拢）
+           ⚠️ 走完预警只是"进波"（wave=0，一根刺都还没冒），还得再推一小段才看得到刺。
+              第一版这里只调了一次 updateSwordEcho(0.001) → 图上啥都没有。 */
+        g.echoDropSword(P.x - 90, P.y - 70);
+        g.echoDropSword(P.x + 110, P.y - 54);
+        g.echoDropSword(P.x + 10, P.y + 96);
+        g.skillEchoStrike.warn = 0;
+        g.updateSwordEcho(0.001);        // 走完预警 → 进波
+        g.updateSwordEcho(0.13);         // 波约 40%：靠边的刺已经破土、扎到的怪在冒火花
+      } else if (kind === 'still') {
+        /* ④ 站着不动：三次落剑落在**同一个坐标** ⇒ 三角退化成一点（面积 0）。
+           修之前这里会翻成"全图每只怪都在阵里"（用户在真机上报的就是这个）；
+           修完之后形状上是"阵不成"：不排刺、不锁目标。
+           这一格就是要能看出「三把剑叠成一把 + 三角只剩一个点 + 一根刺都没有」。 */
+        g.echoDropSword(P.x, P.y);
+        g.echoDropSword(P.x, P.y);
+        g.echoDropSword(P.x, P.y);
+        g.skillEchoStrike.warn = 0;
+        g.updateSwordEcho(0.001);        // 预警走完 → 进波
+        g.updateSwordEcho(0.30);         // 波都快走完了 —— 还是什么都不该发生
+      }
+      g.updateCamera();
+      var cv = document.createElement('canvas'); cv.width = W; cv.height = H;
+      var r = new G.Renderer(cv.getContext('2d'), {
+        cfg: G.Config,
+        createCanvas: function (w2, h2) { var c = document.createElement('canvas'); c.width = w2; c.height = h2; return c; }
+      });
+      r.resize(W, H);
+      r.draw(g, dt === undefined ? 0.016 : dt);
+      return cv;
+    }
+
+    /* 裁到玩家附近（玩家在屏幕中心 406,187.5） */
+    var CROP = { x: 406 - 215, y: 187 - 130, w: 430, h: 250 };
+    var states = [
+      { label: '① 布阵中：地上 2 把虚剑（落在"刚才那两刀"的脚下）', kind: 'deploy' },
+      { label: '② 预警：三剑连成三角，边框随倒计时收紧变亮（' + G.Config.swordEcho.warn + 's）', kind: 'warn' },
+      { label: '③ 剑刺波：三边同时向内炸起剑刺，被围住的怪被穿透（波约 40%）', kind: 'slash' },
+      { label: '④ 站着不动：三点重合、阵不成 —— 一根刺都不排、一只都不扎', kind: 'still' }
+    ];
+
+    var stripH = CROP.h * ZOOM, labelH = 26, pad = 12;
+    var outW = CROP.w * ZOOM + pad * 2;
+    var outH = pad + states.length * (stripH + labelH + pad);
+    var out = document.getElementById('out');
+    out.width = outW; out.height = outH;
+    var ctx = out.getContext('2d');
+    var FONT = '"PingFang SC","Microsoft YaHei",sans-serif';
+    ctx.fillStyle = '#0d0f12'; ctx.fillRect(0, 0, outW, outH);
+
+    states.forEach(function (s, i) {
+      var cv = frame(s.kind);
+      var y = pad + i * (stripH + labelH + pad);
+      ctx.save();
+      ctx.fillStyle = '#cfe9a8';
+      ctx.font = '600 13px ' + FONT; ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+      ctx.fillText(s.label, pad, y + 14);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(cv, CROP.x, CROP.y, CROP.w, CROP.h, pad, y + labelH - 6, CROP.w * ZOOM, stripH);
+      ctx.strokeStyle = 'rgba(255,255,255,.14)'; ctx.lineWidth = 1;
+      ctx.strokeRect(pad + 0.5, y + labelH - 5.5, CROP.w * ZOOM - 1, stripH + 1);
+      ctx.restore();
+    });
+
+    document.title = 'READY ' + outW + 'x' + outH;
+  } catch (e) { document.title = 'ERR: ' + (e && e.message); }
+})();
+</script>
+</body>
+</html>
