@@ -36,6 +36,7 @@ var SWING_MODE = 'onHit';
  *    所以两者要分工：挥刀负责高频"脆"，命中负责低频"重"。
  *    音量也要留出余量 —— 两个音峰值相加超过 1.0 会在手机外放上削波发糊。 */
 var GAIN = {
+  entranceRumble:.50,entranceWell:.55,entranceDoor:.55,entranceStone:.65,entranceBreak:.75,
   swing: 0.48, hit: 0.74, kill: 0.90, hurt: 1.00,
   pickup: 0.65, equip: 0.70, levelup: 0.90, boss: 1.00,
   /* 低血心跳：比打击音轻一档。它每隔几秒就会响一次（背景性提醒），
@@ -67,6 +68,7 @@ var OBEY_MUTE_SWITCH = false;
 
 /* 事件 → 音效文件名前缀（可能有变体，播放时随机挑一个） */
 var EVENT_SOUND = {
+  entranceRumble:'entrance-rumble',entranceWell:'entrance-scrape',entranceDoor:'entrance-door',entranceStone:'entrance-stone',entranceBreak:'entrance-break',
   swing: 'swing', hit: 'hit', kill: 'kill', hurt: 'hurt',
   /* 旋刃：起转用"咻"（= 刀甩起来）。**收刃不出声**（真机："金属声音去掉"）——
      收刃完全没有音画提示，靠"刀刃消失"本身传达。 */

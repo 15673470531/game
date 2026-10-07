@@ -28,6 +28,7 @@
   function runOf(game) {
     var P = game.player;
     return {
+      analyticsRun: game.analyticsRun ? JSON.parse(JSON.stringify(game.analyticsRun)) : null,
       trialVersion: game.cfg.trial.enabled ? game.cfg.trial.version : 0,
       poisonHazards: game.hazards.filter(function(h){return h.kind==='poison';}),
       spitSerial: game.spitSerial||0,
@@ -248,6 +249,8 @@
   function applyRun(game, data) {
     if (!hasRun(data)) return false;
     var r = data.run, P = game.player;
+    game.analyticsRun = r.analyticsRun && (!game.cfg.trial.enabled || r.trialVersion === game.cfg.trial.version)
+      ? JSON.parse(JSON.stringify(r.analyticsRun)) : null;
 
     applyMeta(game, data, 'all');
 

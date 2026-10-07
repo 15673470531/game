@@ -37,12 +37,14 @@
     // 广告 / 分享：可选适配器（见 platform/CONTRACT.md）
     this.ads = deps.ads || null;
     this.share = deps.share || null;
+    this.analytics = deps.analytics || null;
     this.viewport = { w: 0, h: 0 };
     this.cam = { x: 0, y: 0 };
     this.reset();
   }
 
   Game.prototype.reset = function () {
+    this.analyticsRun = null;
     var cfg = this.cfg;
     var spawn = cfg.trial.enabled ? {x:cfg.map.w*.5,y:cfg.map.h*.5} : { x: Math.round(cfg.map.w * 0.133), y: Math.round(cfg.map.h * 0.8125) };
 
@@ -172,7 +174,9 @@
     this.trainingStash = null;  // 进试炼场时暂存的"真实武器"（退出时还回去，见 setTraining）
     this.skillViewKind = null;
     this.skillNotice = null;     // "获得 · XX"（精英掉落的技能捡起来时那一行，见 grantSkill）
-    this.bagTab = 'weapon';     // 武器库面板的页签：'weapon' | 'stats'（属性 = 本局拿过的卡）
+    /* 武器库面板的页签：'weapon'（手里这几把）| 'skills'（这把武器的全部技能）
+       | 'mastery'（**熟练度奖励：Lv1~LvN 每级给什么**，2026-10 从技能页下半块搬出来独立成页）
+       | 'stats'（本局拿过的卡） */
     /* 试炼场·试卡面板（点名试用某张升级卡，见 openTrialCards）：
        页签分类 / 是否试金色版 / 点选护栏（和 bagGuard 同一个道理） */
     this.trialCardCat = 'stat';
@@ -812,6 +816,7 @@
           它改的是 P.base/taken/evolutions/burst。不存的话"进试炼场白点 26 张卡再退出"
           就等于这一局白拿全部卡（试卡面板本来只是沙盒）。 */
     if (next && !was) {
+      if (this.analyticsRun) this.analyticsRun.test = true;
       this.trainingStash = {
         weapon: P.equip.weapon || null,
         base: JSON.parse(JSON.stringify(P.base)),
@@ -1347,6 +1352,7 @@
 
   Game.prototype.damageFoe = function (f, dmg, knockback, src, dirAng) {
     if (!f || f.hp <= 0) return false;
+    if (this.entranceScene || (f.arrival && (f.arrival.elapsed<f.arrival.total || f.arrival.grace>0))) return false;
     var P = this.player, cfg = this.cfg;
 
     if (f.shell && !f.shellOpen && src !== 'reflect' && src !== 'env') {
@@ -1489,7 +1495,7 @@
       var R = f.affix.radius, dmg = f.affix.damage;
       this.parts.burst(f.x, f.y, f.affix.color, 20);
       this.emit('burst', { x: f.x, y: f.y, radius: R });
-      if (Math.hypot(P.x - f.x, P.y - f.y) < R + P.r) this.hurtPlayer(dmg, f.x, f.y, null);
+      if (Math.hypot(P.x - f.x, P.y - f.y) < R + P.r) this.hurtPlayer(dmg, f.x, f.y, f, 'enemy_burst');
     }
 
     if (f.kind === 'boss') {
@@ -1523,18 +1529,18 @@
 
   Game.prototype.weaponSkillRows = function (kind) {
     var self = this;
+    var hasWeapon = kind === 'sword' || (this.player.bag || []).some(function(it){return it && it.kind === kind;}) ||
+      !!(this.player.equip.weapon && this.player.equip.weapon.kind === kind);
     return this.cfg.upgrades.filter(function (c) { return c.weapon === kind; }).map(function (c) {
-      var owned = !!self.player.taken[c.id];
-      /* 没拿到的要分两种（2026-10 熟练度）：
-           · 熟练度还没到的 → 「未解锁 · 需 XX 熟练度 LvN」——玩家得知道"练哪把才给"
-           · 熟练度到了、只是这一局还没掉出来 → 「已解锁 · 精英掉落」
-         原来一律写"未获得"，那把被熟练度锁住的技能看起来就像"这游戏没有它"。 */
+      // Home shows permanent access, never the previous run's active skills.
+      var owned = hasWeapon && !self.homeLibrary && !!self.player.taken[c.id];
       var status;
-      if (owned) status = (kind === self.weaponKind()) ? '已获得 · 生效中' : '已获得 · 装备后生效';
+      if (!hasWeapon) status = '未解锁 · 先获得对应武器';
+      else if (owned) status = (kind === self.weaponKind()) ? '已获得 · 生效中' : '已获得 · 装备后生效';
       else if (c.masteryMin && !self.masteryUnlocked(kind, c.masteryMin))
         status = '未解锁 · 需' + ((self.cfg.weapons[kind] && self.cfg.weapons[kind].name) || kind) +
                  '熟练度 Lv' + c.masteryMin;
-      else status = '已解锁 · 精英掉落';
+      else status = '可获取 · 局内精英掉落';
       return { id: c.id, name: c.name, desc: c.desc, owned: owned, status: status };
     });
   };
@@ -1543,12 +1549,72 @@
      （用户口径"在武器库里面有"），对应的点击热区也删了。
      想找武器技能/属性：左下角「武器库」→「技能」页签（`bagBtnRect()` + `bagTabs()`）。 */
 
-  Game.prototype.skillPanelRects = function () {
+  /**
+   * 武器库「技能」页 / 「熟练度」页**共用的外框**：那排武器页签 + 整页 body。
+   * 两页的头部一模一样（布局确定性：切页时下面的东西不许挪），所以只算一份。
+   *
+   * 比例是**按 812x375 横屏反推的**：
+   *   · body.h = 199.5（vp.h 375 - 底部 21 安全区 - y 46.5 - 68 页脚）
+   *   · 技能页：body 整块给技能卡（卡片高 = body.h - 26 = 173.5，名字 +9 / 状态 +30 / 描述 +52，
+   *     多出来的高度是描述换行的余量，不会再像以前那样只有 74px 必须压字号）
+   *   · 熟练度页：body 上半一行进度（复用 drawMasteryBlock，26px）+ 下半 Lv1~LvN 竖排（一级一行）
+   *
+   * ⚠️ `tabs` 是**武器**页签（长剑/双刀/…），不是顶部那排「武器/技能/熟练度/属性」——
+   *    顶部那排来自 bagTabs()，两者别混。
+   * ⚠️ body 仍然是**整页**——判定用的就是它（点 body 里 = 什么都不做，点外面 = 关掉）。
+   */
+  Game.prototype.weaponPageFrame = function () {
     var vp = this.viewport, ins = vp.insets || {}, y = this.bagTabs()[0].y + 40;
     var width = Math.min(700, vp.w - (ins.left || 0) - (ins.right || 0) - 32), x = (vp.w - width) / 2;
-    var kinds = Object.keys(this.cfg.weapons), gap = 6, w = (width - gap * 4) / 5;
-    return { tabs: kinds.map(function (kind, i) { return {kind: kind, x: x + i * (w + gap), y: y, w: w, h: 27}; }),
-      body: {x: x, y: y + 36, w: width, h: vp.h - (ins.bottom || 0) - y - 68} };
+    var kinds = Object.keys(this.cfg.weapons), gap = 6, w = (width - gap * (kinds.length - 1)) / kinds.length;
+    return {
+      tabs: kinds.map(function (kind, i) {
+        return { kind: kind, x: x + i * (w + gap), y: y, w: w, h: 27 };
+      }),
+      body: { x: x, y: y + 36, w: width, h: vp.h - (ins.bottom || 0) - y - 68 }
+    };
+  };
+
+  /**
+   * 武器库「技能」页：**2026-10 起只有一块** —— 这把武器的全部技能。
+   * 熟练度奖励原来挤在这页下半块，现在独立成页（见 masteryPanelRects / drawMasteryPanel）；
+   * 拆开的原因和口径见 bagTabs 那段注释。
+   */
+  Game.prototype.skillPanelRects = function () {
+    var f = this.weaponPageFrame();
+    return {
+      tabs: f.tabs,
+      body: f.body,
+      /* 技能块 = 整个 body（一页一块，不再和熟练度分高度） */
+      skills: { x: f.body.x, y: f.body.y, w: f.body.w, h: f.body.h }
+    };
+  };
+
+  /**
+   * 武器库「熟练度」页（熟练度奖励）：这一页只说一件事 —— **练这把武器，每级能拿到什么**。
+   *   ① 顶部一行进度（drawMasteryBlock：当前点数 / 本级上限 + 进度条 + 下一级给什么）
+   *   ② 下面 Lv1~LvN **一级一行**（drawCodexLevelRow：等级 + 门槛 + 这一级给什么）
+   * ⚠️ 行数按 config.mastery.levels 的实际长度算（写死 4 行，改门槛表就会漏画一级）。
+   * ⚠️ 内容一个字都不在这里拼：等级/门槛/奖励文案全来自 codexMasteryRows（再往上是 config.mastery）。
+   */
+  Game.prototype.masteryPanelRects = function () {
+    var f = this.weaponPageFrame();
+    var kind = this.skillViewKind || this.weaponKind();
+    var rows = this.codexMasteryRows(kind).length || 1;
+    /* head = 顶部那块进度占的高度（drawMasteryBlock 本体 26px + 上下留白）。
+       ⚠️ 这块**必须实占高度**：2026-10 出图抓到过——把它压成 26 时，进度条的"下一级 Lv3：…"
+          正好落在第一行 Lv1 的框线上（字压框，看着像画崩）。 */
+    var head = 34, vgap = 8, list = { x: f.body.x, y: f.body.y + head, w: f.body.w, h: f.body.h - head };
+    return {
+      tabs: f.tabs,
+      body: f.body,
+      progress: { x: f.body.x, y: f.body.y, w: f.body.w, h: head },
+      /* 每级一行：行高按实际行数分，一行都不许掉出 body */
+      rows: rows,
+      rowsGap: vgap,
+      rowH: (list.h - vgap * (rows - 1)) / rows,
+      list: list
+    };
   };
 
   Game.prototype.openLevelUp = function () {
@@ -1765,7 +1831,17 @@
     return out;
   };
 
-  /** 武器库面板顶部的两个页签（渲染和判定共用同一份矩形） */
+  /**
+   * 武器库面板顶部的页签（渲染和判定共用同一份矩形）。**2026-10 起四个**：
+   *   武器 / 技能 / **熟练度（Lv1~LvN 每级给什么 = 熟练度奖励表）** / 属性。
+   *
+   * ⚠️ 熟练度**数据源一个字没改**（config.mastery → codexMasteryRows / masteryShortText），
+   *    这里只换了它的"家"：原来说好并进技能页下半块，实际一页塞两块谁都放不开 ——
+   *    技能卡只有 74px 高、熟练度格子被压成两行小字（用户 2026-10 口径："技能模块看着有点错乱"），
+   *    拆成独立一页后两块各自拿到整页高度。
+   * ⚠️ 宽度按**页签数**算 —— 原来写死 `w * 3 + gap * 2`，加第 4 个页签会把右边那个顶出屏幕
+   *    （与 drawBagPanel 底部那排按钮同一个坑：别再写死个数）。
+   */
   Game.prototype.bagTabs = function () {
     var vp = this.viewport, ins = vp.insets || {};
     var w = 108, h = 30, gap = 10;
@@ -1773,12 +1849,16 @@
     /* 页签压在卡片上面一点：卡片位固定（bagRects 是按视口算的），页签跟着它走，
        这样两个页签之间切换时**下面的内容不会挪**（用户口径：布局确定性，别忽高忽低）。 */
     var y = rects.length ? Math.max((ins.top || 0) + 10, rects[0].y - 44) : vp.h / 2 - 70;
-    var x0 = (vp.w - (w * 3 + gap * 2)) / 2;
-    return [
-      { id: 'weapon', label: '武器', x: x0, y: y, w: w, h: h },
-      { id: 'skills', label: '技能', x: x0 + w + gap, y: y, w: w, h: h },
-      { id: 'stats', label: '属性', x: x0 + (w + gap) * 2, y: y, w: w, h: h }
+    var defs = [
+      { id: 'weapon',  label: '武器' },
+      { id: 'skills',  label: '技能' },
+      { id: 'mastery', label: '熟练度' },
+      { id: 'stats',   label: '属性' }
     ];
+    var x0 = (vp.w - (w * defs.length + gap * (defs.length - 1))) / 2;
+    return defs.map(function (d, i) {
+      return { id: d.id, label: d.label, x: x0 + i * (w + gap), y: y, w: w, h: h };
+    });
   };
 
   Game.prototype.openBag = function () {
@@ -1792,8 +1872,15 @@
   };
 
   Game.prototype.closeBag = function () {
-    this.state = this.bagReturnState === 'levelup' ? 'levelup' : 'play';
+    /* ⚠️ 2026-10：从暂停面板开出来的武器库，关掉要**回暂停面板**（用户口径：
+       「关掉武器库回到暂停面板」）—— 换完武器 / 只是看了看，都停在面板上，由玩家自己点「继续」。
+       以前不管从哪儿开都直接回 play（换完武器立刻接着打，没个"我准备好了"的动作）。
+       levelup 那条路照旧回选卡；其余（容错）回 play。
+       ⚠️ 顺手立 pauseGuard：否则"点空白关掉武器库"那一下手指会被暂停面板当成一次点击。 */
+    this.state = this.bagReturnState === 'levelup' ? 'levelup'
+               : (this.bagReturnState === 'paused' ? 'paused' : 'play');
     this.bagGuard = 0.12;
+    if (this.state === 'paused') this.pauseGuard = 0.12;
     return true;
   };
 
@@ -1833,12 +1920,14 @@
         return;
       }
     }
-    if (this.bagTab === 'skills') {
-      var panel = this.skillPanelRects();
-      for (var k = 0; k < panel.tabs.length; k++) if (this.inRect(panel.tabs[k], input.tap)) {
-        this.skillViewKind = panel.tabs[k].kind; return;
+    /* 技能页 / 熟练度页共用一套判定（两页的页签和 body 来自同一个 weaponPageFrame）：
+       点页内那排武器页签 = 换看哪把武器；点 body 里 = 什么都不做；点 body 外 = 关掉。 */
+    if (this.bagTab === 'skills' || this.bagTab === 'mastery') {
+      var frame = this.weaponPageFrame();
+      for (var k = 0; k < frame.tabs.length; k++) if (this.inRect(frame.tabs[k], input.tap)) {
+        this.skillViewKind = frame.tabs[k].kind; return;
       }
-      if (this.inRect(panel.body, input.tap)) return;
+      if (this.inRect(frame.body, input.tap)) return;
       this.closeBag(); return;
     }
     if (this.bagTab !== 'weapon') { this.closeBag(); return; }   // 属性页：点空白处关掉
@@ -2190,6 +2279,7 @@
       // ⚠️ 本帧的循环里可能会移除敌人（反伤/溅射一次打死好几只）→ 索引短暂越界。
       //    不容忍 undefined 的话真机上会直接崩：Cannot read property 'hurt' of undefined
       if (!f) continue;
+      if(f.arrival&&(f.arrival.elapsed<f.arrival.total||f.arrival.grace>0))continue;
       f.hurt = Math.max(0, f.hurt - dt);
       f.ph += dt * 3;
       if (f.blockT > 0) f.blockT = Math.max(0, f.blockT - dt);
@@ -2657,7 +2747,7 @@
         var ca = Math.atan2(P.y - b.y, P.x - b.x);
         var cdiff = Math.abs(((ca - (b.clawDir || 0) + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
         if (d < B.claw.range + P.r && cdiff < B.claw.arc) {
-          this.hurtPlayer(B.claw.damage, b.x, b.y, b);
+          this.hurtPlayer(B.claw.damage, b.x, b.y, b, 'boss_claw');
           /* 额外推开 = 这一招的真正代价不是掉血，是"被赶出你原来的输出位置"。
              方向按当前位置现算（不按预警方向），这样被夹住的人一定被往外送。 */
           var ka = Math.atan2(P.y - b.y, P.x - b.x);
@@ -2677,7 +2767,7 @@
         this.parts.burst(b.castX, b.castY, '#ff8a5c', 26);
         this.emit('slam', { x: b.castX, y: b.castY });
         if (Math.hypot(P.x - b.castX, P.y - b.castY) < B.slam.radius) {
-          this.hurtPlayer(B.slam.damage, b.castX, b.castY, b);
+          this.hurtPlayer(B.slam.damage, b.castX, b.castY, b, 'boss_slam');
         }
       }
       return 0;
@@ -2832,7 +2922,7 @@
           }
         }
       } else if (!dead && Math.hypot(P.x - p.x, P.y - p.y) < P.r + p.r) {
-        this.hurtPlayer(p.damage, p.x, p.y, null);
+        this.hurtPlayer(p.damage, p.x, p.y, null, p.slow ? 'boss_sting' : 'enemy_projectile');
         if (p.slow) this.applySlow(p.slow, p.slowTime);   // 尾针毒刺：命中附带中毒减速
         dead = true;
       }
@@ -2998,6 +3088,8 @@
      ⚠️ 必须自动收掉落：Boss 掉的装备/金币就是这局的奖励，不自动收等于直接蒸发。
      ⚠️ 这段时间要继续挡住刷怪（见 updateSpawns 里的 clearT 判断）。 */
   Game.prototype.stageClear = function () {
+    this.track('wave_complete');
+    this.track('run_complete');
     this.finishRanked(true);
     /* 熟练度：**打完 Boss 通关**那一下（2026-10 用户口径"每次过关打完 boss 增加熟练度"）。
        ⚠️ 顺序有讲究：**先入账、再判满级奖励** —— 于是"差一点升满级"的那一把，
@@ -3161,7 +3253,7 @@
           /* friendly = 玩家自己留的火痕（灼痕卡）：**只烧怪、不烧自己**。
              走的是"环境伤害"那条路 → 合壳的甲壳兽照吃（免疫只针对武器，见 config）。 */
           if (h.friendly) this.burnFoesIn(h);
-          else if (inHazardArea(h, P)) this.hurtPlayer(h.damage || 14, h.x, h.y, null);
+          else if (inHazardArea(h, P)) this.hurtPlayer(h.damage || 14, h.x, h.y, null, h.kind || 'hazard');
         }
         if (h.hold <= 0) this.hazards.splice(i, 1);
         continue;
@@ -3171,7 +3263,7 @@
         h.fired = true;
         h.t = 0.2;                                     // 落地余波：只为了看得见，不再造成伤害
         if (Math.hypot(P.x - h.x, P.y - h.y) < h.r + P.r * 0.5) {
-          this.hurtPlayer(H.damage, h.x, h.y, null);   // 只打玩家；不给经验、不触发反伤
+          this.hurtPlayer(H.damage, h.x, h.y, null, 'hazard');   // 只打玩家；不给经验、不触发反伤
         }
         this.parts.burst(h.x, h.y, '#ff7a4d', 14);
         this.emit('hazardHit', { x: h.x, y: h.y });
@@ -3199,8 +3291,9 @@
 
   /* ==================== 受伤 ==================== */
 
-  Game.prototype.hurtPlayer = function (dmg, fromx, fromy, from) {
+  Game.prototype.hurtPlayer = function (dmg, fromx, fromy, from, source) {
     if (this.trial && this.trial.finished) return;
+    if(this.entranceScene||(from&&from.arrival&&(from.arrival.elapsed<from.arrival.total||from.arrival.grace>0)))return;
     var cfg = this.cfg, P = this.player;
     /* 试炼场默认无敌（试武器时不该被怪打断）。
        但"试 Boss"是无敌就没意义了 —— `debug.damage` 打开时照样挨打，
@@ -3252,6 +3345,7 @@
         }
       }
       this.state = 'dead';
+      this.track('run_death', { detail: source || (from && (from.bossType || from.type || from.kind)) || 'unknown' });
       this.finishRanked(false);
       this.bestKills = Math.max(this.bestKills, P.kills);
       this.runs++;
@@ -3389,6 +3483,8 @@
    *    只有从"真的在打"的地方回首页（暂停面板）才该存。
    */
   Game.prototype.toTitle = function (opts) {
+    if (this.state === 'dead' || this.state === 'clear') this.track('settle_action', { detail: 'home' });
+    else if (!opts || opts.keep !== false) this.track('run_leave', { detail: 'home' });
     /* 回首页前先存一次（此时 state 还是 play/paused ⇒ run 块会写进去），回来才能「继续上次」。
        从死亡界面回首页时 saveNow 不会写 run 块（见 saveNow 里的说明）—— 死了就是死了。 */
     if (!opts || opts.keep !== false) this.saveNow();
@@ -3451,7 +3547,14 @@
     if(this.rankEligible&&this.state==='play'&&!this.rankResult&&!this.training&&Number.isFinite(dt)&&dt>0)this.rankSeconds+=dt;
   };
 
+  Game.prototype.track = function (event, detail) {
+    if (!this.analytics || this.training || !this.analyticsRun) return;
+    try { this.analytics.track(this, event, detail || {}); } catch (_) {}
+  };
+
   Game.prototype.startRun = function (useResume) {
+    if (this.state === 'dead' || this.state === 'clear') this.track('settle_action', { detail: 'again' });
+    else if (this.state !== 'title') this.track('run_leave', { detail: 'restart' });
     this.ranked=false;
     var data = this.resumeData, out = 'new';
     /* ⚠️ 这里原来有一段"按 selectedWeapon 换开局武器"——那是首页开局武器按钮的落点。
@@ -3464,6 +3567,9 @@
     this.resumeData = null;
     this.settingsOpen = false;
     this.state = 'play';
+    if (this.analytics) {
+      try { this.analytics.begin(this, out === 'resumed'); } catch (_) {}
+    }
     /* 立刻存一次：新局把旧的 run 块覆盖掉（这就是「重新开始」的含义），
        续局则把"已经开始打"这件事落盘。 */
     this.saveNow();
@@ -3497,14 +3603,17 @@
     var blockH = main.length * bh + (main.length - 1) * gap;
     var y0 = Math.max(ty + 76, Math.min(vp.h * 0.57 - blockH / 2, footerY - 34 - blockH));
     for (var i = 0; i < main.length; i++) main[i].y = Math.round(y0 + i * (bh + gap));
-    /* 底部那一排：游戏介绍 / 玩法说明 / 开局武器 / **武器图鉴**（2026-10 用户选的 Aa）。
-       4 个按钮的宽度按屏宽重算 —— 原来是写死 `(vp.w - 60) / 3`（3 个按钮），
-       加第 4 个还按 3 算的话右边那个会顶出屏幕。 */
+    /* 底部那一排：游戏介绍 / 玩法说明 / 开局武器。宽度按**按钮数**重算
+       （别再写死 /3 —— 以后再加按钮，右边那个会顶出屏幕）。
+       ⚠️ 2026-10：「武器图鉴」这个按钮**已摘掉**。用户口径：「游戏首页的武器图鉴去掉，
+       在游戏里面点击暂停后，弹出的菜单里面需要包含武器库」⇒ 四把武器的全部技能 /
+       熟练度奖励改看**局内暂停 →「武器库」**。图鉴的代码（openCodex / codexRects /
+       drawCodex / codexMasteryRows）一行没删，只是这里不给入口了 —— 想恢复就往
+       infoDefs 里加回一行，别的地方不用动。 */
     var infoDefs = [
       { id: 'intro',   label: '游戏介绍' },
       { id: 'guide',   label: '玩法说明' },
-      { id: 'loadout', label: '开局：' + this.startWeaponInfo().name },
-      { id: 'codex',   label: '武器图鉴' }
+      { id: 'loadout', label: '开局：' + this.startWeaponInfo().name }
     ];
     var igap = 8;
     var fw = Math.min(150, (vp.w - 40 - igap * (infoDefs.length - 1)) / infoDefs.length);
@@ -3790,7 +3899,7 @@
          只能有默认的长剑使用，其他变成不可选」）。点开只是一个"交代"面板：
          默认那把亮着，其他四把锁着 + 写明哪一关的 Boss 掉。 */
       if (r.info[i].id === 'loadout') { this.loadoutOpen = true; return true; }
-      if (r.info[i].id === 'codex') { this.openCodex(); return true; }
+      if (r.info[i].id === 'codex') { this.openCodex(); return true; }   // infoDefs 里已没有 codex ⇒ 到不了这儿（图鉴页没删，只是没入口）
       this.infoOpen = r.info[i].id; this.infoPage = 0; return true;
     }
     for (i = 0; i < r.main.length; i++) {
@@ -3812,6 +3921,18 @@
 
   Game.prototype.updateSettingsPanel = function (p) {
     var r = this.settingsRects(), i;
+    // Owner-only convenience: five quick taps on the settings heading open a local test-device switch.
+    if (this.analytics && this.inRect({ x:r.panel.x, y:r.panel.y, w:r.panel.w, h:38 }, p)) {
+      var now = Date.now();
+      this.analyticsTapCount = now - (this.analyticsTapAt || 0) < 1200 ? (this.analyticsTapCount || 0) + 1 : 1;
+      this.analyticsTapAt = now;
+      if (this.analyticsTapCount >= 5) {
+        this.analyticsTapCount = 0;
+        try { this.analytics.configureTestDevice(); } catch (_) {}
+      }
+      return true;
+    }
+    this.analyticsTapCount = 0;
     for (i = 0; i < r.rows.length; i++) {
       if (!this.inRect(r.rows[i], p)) continue;
       if (r.rows[i].kind === 'toggle') { this.toggleSetting(r.rows[i].id); return true; }
@@ -3864,34 +3985,58 @@
   };
 
   Game.prototype.pauseRects = function () {
-    /* ⚠️ 2026-10 起「换武器」入口就在这里（用户口径：左下角那个按钮没必要放，页面简洁一点）。
-       只在**手里不止一把武器**时才出现 —— 一局的前半段面板和以前一模一样。
-       为什么放这儿而不是留个 HUD 按钮：换武器本来就是"停下来做的决策"，打开武器库时游戏也本来就是暂停的，
-       所以进暂停面板换 = 同样的交互，但不占画面。 */
+    /* ⚠️ 2026-10 大改（用户口径：「首页的武器图鉴去掉，点暂停后弹出的菜单里要包含武器库」）：
+       · 第一行从「换武器」改名「武器库」，并且**去掉 ≥2 把武器的门槛** —— 恒显。
+         原来那行只在手里两把以上才出现（开局只有一把长剑、双刀要长剑熟练度 Lv4 才掉）
+         ⇒ "进去看技能/属性"这条路大多数时候根本不存在。
+         一把武器时它是"查看"入口，两把以上才是"换"（面板内部逻辑一点没变，还是那个 state='bag'）。
+       · 音乐/音效/震动 三行并成一行三个小开关（用户选的 4a）。**不是为了好看，是必须**：
+         多一行「武器库」= 7 行 = 434px，横屏 812x375 直接出屏 70px（最后两行被切掉）。
+         并成一行后 5 行 = 328px，比改动前（6 行 378px）还矮，横竖屏都放得下。
+       ⚠️ 关掉武器库回的是**暂停面板**（不是直接继续），见 closeBag。 */
     var rows = [];
-    /* ⚠️ 条件是"真的有两把可换"，不是 canSwitchWeapon()：后者其实是"能不能打开武器库"
-       （`bag.length >= 1`，只要开局那把在就恒真 —— 所以原来左下角那个按钮是**一直挂着**的，
-       难怪用户说"没必要放这里"）。 */
-    if (((this.player && this.player.bag) || []).length >= 2) rows.push({ id: 'bag', label: '换武器', h: 46 });
+    rows.push({ id: 'bag',     label: '武器库', h: 46 });
     rows.push({ id: 'resume',  label: '继续', h: 46 });
     rows.push({ id: 'restart', label: this.cfg.ui.restart, h: 46 });
     rows.push({ id: 'home',    label: '回首页', h: 46 });
-    rows.push({ id: 'music',   kind: 'toggle', label: '音乐', h: 44 });
-    rows.push({ id: 'sound',   kind: 'toggle', label: '音效', h: 44 });
-    rows.push({ id: 'vibrate', kind: 'toggle', label: '震动', h: 44 });
-    return panelRects(this.viewport, this.viewport.insets || {}, rows, { maxW: 300, title: '已暂停' });
+    rows.push({ id: 'switches', kind: 'switches', h: 46 });
+    var R = panelRects(this.viewport, this.viewport.insets || {}, rows, { maxW: 300, title: '已暂停' });
+    /* 三个开关的子矩形挂在那一行上（核心层算，渲染层只画 —— 改布局只改 pauseSwitchRects 一处） */
+    for (var i = 0; i < R.rows.length; i++) {
+      if (R.rows[i].kind === 'switches') R.rows[i].toggles = this.pauseSwitchRects(R.rows[i]);
+    }
+    return R;
+  };
+
+  /**
+   * 暂停面板里那一行的三个小开关（音乐 / 音效 / 震动）—— 渲染和判定共用同一份矩形。
+   * 每个开关是"标签 + 开/关"两行字的淡色小卡片，不是实心胶囊（用户口径：表现要小要淡）。
+   */
+  Game.prototype.pauseSwitchRects = function (row) {
+    var defs = [{ id: 'music', label: '音乐' }, { id: 'sound', label: '音效' }, { id: 'vibrate', label: '震动' }];
+    var gap = 8, ch = row.h - 10, cy = row.y + 5;
+    var cw = (row.w - gap * (defs.length - 1)) / defs.length;
+    return defs.map(function (d, i) {
+      return { id: d.id, label: d.label, toggle: true, h: ch,
+               x: Math.round(row.x + i * (cw + gap)), y: cy, w: Math.round(cw) };
+    });
   };
 
   Game.prototype.updatePaused = function (input) {
     var p = input.tap;
     if (!p) return false;
     if (this.pauseGuard > 0) return false;        // 护栏在 update() 开头统一递减
-    var r = this.pauseRects(), i;
+    var r = this.pauseRects(), i, k;
     for (i = 0; i < r.rows.length; i++) {
       var b = r.rows[i];
+      /* 合并后的开关行：一行三个小开关，各自有自己的热区（这一行本身不是按钮） */
+      if (b.kind === 'switches') {
+        var ts = b.toggles || [];
+        for (k = 0; k < ts.length; k++) if (this.inRect(ts[k], p)) { this.toggleSetting(ts[k].id); return true; }
+        continue;
+      }
       if (!this.inRect(b, p)) continue;
-      if (b.kind === 'toggle') { this.toggleSetting(b.id); return true; }
-      /* 换武器：从暂停面板开武器库（2026-10 左下角按钮删掉之后的唯一入口）。
+      /* 武器库：暂停面板第一行，**唯一入口**（左下角那个 HUD 按钮 2026-10 已删）。
          ⚠️ openBag 会自己把 bagGuard 立起来挡连点，这里不用另外加护栏。 */
       if (b.id === 'bag') { this.openBag(); return true; }
       if (b.id === 'resume') return this.resume();
@@ -4065,6 +4210,7 @@
     var P = this.player, cfg = this.cfg;
     if (this.state !== 'dead' || this.reviveLeft() <= 0) return false;
     this.revives++;
+    this.track('run_revive');
     this.rankResult=null; // Continued progress after revival may improve the recorded result.
     P.dead = false;
     P.hp = Math.max(1, Math.round(P.stats.maxhp * (cfg.ads.reviveHpPct || 0.5)));
@@ -4709,8 +4855,23 @@
     }
     return null;
   };
+  // Prefer a landmark-facing edge, retaining the viewport exclusion and collision checks.
+  Game.prototype.realmEntrance = function (boss) {
+    var L=this.world.landmarks;if(!L)return this.trialSpawnPoint();
+    var target=boss?L.ancientTree:(this.wave===1?L.houses[0]:L.well);
+    var dx=target.x-this.player.x,dy=target.y-this.player.y;
+    var side=Math.abs(dx)>Math.abs(dy)?(dx<0?0:1):(dy<0?2:3);
+    var fallback=null;
+    for(var n=0;n<12;n++){
+      var p=this.trialSpawnPoint(n<4?side:undefined);if(!p)continue;
+      if(!this.world.isFree(p.x,p.y,boss?40:30))continue;
+      if(!fallback)fallback=p;
+      if(!boss||this.world.isFree(p.x,p.y,125))return p;
+    }
+    return fallback||this.trialSpawnPoint();
+  };
   Game.prototype.spawnTrialFoe = function (elite, point) {
-    var t=this.trial,C=this.cfg.trial,p=point||this.trialSpawnPoint();if(!p)return false;
+    var t=this.trial,C=this.cfg.trial,p=point||(elite?this.realmEntrance(false):this.trialSpawnPoint());if(!p)return false;
     var n=t.spawned, type='slime';
     /* 精英的外形/数值全部来自 cfg.trial.elite[波次]（一只按波定义，不再硬编码"裂钳守卫"）。 */
     var E=(C.elite||[])[this.wave-1]||null;
@@ -4772,6 +4933,7 @@
   };
 
   Game.prototype.advanceTrialWave = function () {
+    this.track('wave_complete');
     var ledger=this.trial.killsByWave||{};ledger[this.wave]=this.trial.killed;
     this.wave++;this.trial={spawned:0,killed:0,eliteSpawned:false,eliteDead:false,skillTaken:false,warning:0,warningKind:'',delay:2,finished:false};
     this.trial.killsByWave=ledger;
@@ -4829,7 +4991,7 @@
     if(t.warningKind&&t.warning===0){
       if(t.warningKind==='elite'){if(this.foes.length<this.enemyCap()&&this.spawnTrialFoe(true))t.warningKind='';}
       else {
-        var p=this.trialSpawnPoint();if(!p)return;
+        var p=this.realmEntrance(true);if(!p)return;
         var b=this.Entities.makeBoss(this.cfg,p.x,p.y,1,'warden',1);
         this.foes.push(b);this.bossAlive=1;this.stageBossPending=true;this.bossSpawnedForStage=1;this.bossCount++;
         t.warningKind='';return;

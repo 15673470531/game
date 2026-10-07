@@ -38,7 +38,8 @@ case "$WHAT" in
   settle) PAGE="preview-settle.html"; OUT="$HERE/../docs/settle-mastery-text.png"; W=1700; H=1300 ;;
   loadout) PAGE="preview-loadout.html"; OUT="$HERE/../docs/loadout-mastery.png"; W=812; H=1650 ;;
   codex)  PAGE="preview-codex.html"; OUT="$HERE/../docs/codex.png"; W=1670; H=850 ;;
-  *) echo "用法: bash tools/shot-boss.sh [boss|burst|cards|title|player|walk|head|hud|lowhp|skilldrop|swordsman|side|settings|reroll|attackcd|mastery|echo|blades|echo2|spike|settle|loadout|codex]" >&2; exit 1 ;;
+  pause)  PAGE="preview-pause.html"; OUT="$HERE/../docs/pause-bag.png"; W=812; H=2440 ;;
+  *) echo "用法: bash tools/shot-boss.sh [boss|burst|cards|title|player|walk|head|hud|lowhp|skilldrop|swordsman|side|settings|reroll|attackcd|mastery|echo|blades|echo2|spike|settle|loadout|codex|pause]" >&2; exit 1 ;;
 esac
 
 CHROME=""

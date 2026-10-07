@@ -202,7 +202,7 @@ assert.equal(Prog.masteryLevel(99999, cfg), 4, '超出门槛也只到满级（�
   assert(rows1.some(r => r.status === '未解锁 · 需长剑熟练度 Lv2'), 'Lv1 时剑阵回响写"未解锁 · 需长剑熟练度 Lv2"');
   assert(!rows1.some(r => r.status === '未获得'), '不许再出现笼统的"未获得"');
   g3.player.mastery.sword = 300;
-  assert(g3.weaponSkillRows('sword').some(r => r.status === '已解锁 · 精英掉落'), 'Lv2 之后改成"已解锁 · 精英掉落"');
+  assert(g3.weaponSkillRows('sword').some(r => r.status === '可获取 · 局内精英掉落'), 'Lv2 之后改成"可获取 · 局内精英掉落"');
 }
 
 /* ==================== ⑧ 满级奖励：打完 Boss 有几率掉双刀 ==================== */

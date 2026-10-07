@@ -28,6 +28,9 @@ var WechatAds = require('./platform/wechat/ads.js');
 var WechatShare = require('./platform/wechat/share.js');
 var FriendRanking=require('./platform/wechat/ranking.js');
 var NS = GameGlobal.__GAME__;
+var WechatAnalytics = require('./platform/wechat/analytics.js');
+var analytics = new WechatAnalytics(wx, NS.Config.analytics);
+NS.analytics = analytics;
 
 /* 2) 画布与尺寸 */
 var canvas = wx.createCanvas();
@@ -64,7 +67,8 @@ var game = new NS.Game(NS.Config, {
   Save: NS.Save,
   storage: storage,
   ads: ads,
-  share: share
+  share: share,
+  analytics: analytics
 });
 game.setViewport(W, H, insets);     // 安全区也要给核心层：武器库按钮贴左下角，得避开刘海/横条
 /* ⚠️ 启动进**首页**（标题 + 开始游戏 / 继续上次），而不是直接开打。
@@ -77,6 +81,12 @@ game.toTitle({ keep: false });      // keep:false —— 刚启动时别拿一�
 game.ranking=new FriendRanking(wx);
 NS.game = game;
 NS.storage = storage;
+var Account = require('./platform/wechat/account.js');
+var Adventure = require('./core/adventure.js');
+var account = new Account(wx);
+var adventure = new Adventure(game, account, wx);
+NS.account = account; NS.adventure = adventure;
+adventure.boot();
 
 var input = new TouchInput(wx, {
   width: W, height: H,
@@ -137,10 +147,15 @@ syncViewport();
    切后台随时可能被杀掉：先把这一局落盘（下次进来能「继续上次」），并停成暂停面板
    —— 回来时不会发现自己"在怪堆里继续挨打"。 */
 wx.onHide(function () {
+  analytics.flush();
+  game.track('app_hide', { detail: game.state });
   game.pause();
   game.saveNow();
+  account.sync(true);
 });
 wx.onShow(function () {
+  analytics.flush();
+  game.track('app_show', { detail: game.state });
   last=0;
   syncViewport();viewportChecks=30;
   input.resize({width:W,height:H,safeArea:{top:insets.top,height:H-insets.top-insets.bottom}});
@@ -192,8 +207,8 @@ function loop(now) {
   renderer.handleEvents(events);
 
   game.tickRankClock(rawDt);
-  game.update(dt, input.read(game));
-  renderer.draw(game, now / 1000);
+  adventure.update(dt, input.read(game));
+  adventure.draw(renderer, now / 1000);
   input.draw(ctx, game);           // 摇杆/按键画在最上层
   requestAnimationFrame(loop);
 }
