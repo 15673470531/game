@@ -224,7 +224,11 @@ function frames(au, n, dt) { for (let i = 0; i < n; i++) au.tickMusic(dt === und
   assert(rows.indexOf('music') >= 0, '设置面板要有「音乐」行，实际：' + rows.join(','));
   assert(rows.indexOf('music') < rows.indexOf('sound'), '音乐排在最上面（它是"有没有背景声"的第一层）');
   const prows = g.pauseRects().rows.map(r => r.id);
-  assert(prows.indexOf('music') >= 0, '暂停面板也要有「音乐」行，实际：' + prows.join(','));
+  /* ⚠️ 2026-10：暂停面板里 音乐/音效/震动 已并成**一行三个小开关**（为了给第一行
+     「武器库」腾高度 —— 否则 7 行 434px 在横屏 812x375 出屏 70px）。
+     所以这里不再按"行 id 里找 music"，改成到那一行的 toggles 子矩形里找。 */
+  const pauseToggles = ((g.pauseRects().rows.find(r => r.kind === 'switches') || {}).toggles) || [];
+  assert(pauseToggles.some(t => t.id === 'music'), '暂停面板也要有「音乐」开关，实际：' + pauseToggles.map(t => t.id).join(','));
 
   /* ⚠️ 加一行会把面板顶高 —— 面板不许超出"最小常见机型"（320x568 = iPhone SE）的视口：
      别处有断言证明"行存在"，但证明不了"没被挤出屏幕"。实测过：加了「音乐」这行之后

@@ -44,7 +44,15 @@
     var st = stageOf(cfg, stageIdx || 1);
     var wallDefs = (st && st.walls) ? st.walls : (c.walls || []);
     var ground = (st && st.ground) ? st.ground : { base: '#3c5a34', patch: [40, 110, 40], path: 'rgba(120,98,66,.42)' };
-    var walls = [], rocks = [], paths=[],trees=[],corridors=[];
+    var walls = [], rocks = [], paths=[],trees=[],corridors=[], landmarks=null;
+    if(cfg.trial&&cfg.trial.enabled){
+      ground={base:'#293e40',patch:[43,77,66],path:'rgba(141,150,135,.3)'};
+      landmarks={altar:{x:spawn.x,y:spawn.y},well:{x:W*.28,y:H*.44},
+        ancientTree:{x:W*.52,y:H*.14},houses:[],bamboo:[]};
+      [[.24,.35,94,66],[.10,.48,110,72],[.23,.64,92,66],[.34,.69,84,60],[.12,.69,76,58]].forEach(function(h){
+        landmarks.houses.push({x:h[0]*W,y:h[1]*H,w:h[2],h:h[3]});
+      });
+    }
     if(cfg.trial&&cfg.trial.enabled){
       wallDefs=[];
       // Connected outer loop, crossed branches and a clear central fighting space.
@@ -101,12 +109,12 @@
       for (var i = 0; i < rocks.length; i++) {
         if (Math.hypot(rocks[i].x - x, rocks[i].y - y) < rocks[i].r + r + 70) { bad = true; break; }
       }
-      if (bad || nearPath(x,y,r)) continue;
+      if (bad || nearPath(x,y,r) || (landmarks && nearLandmark(x,y,r+100))) continue;
       if (nearWall(walls, x, y, r)) continue;      // 别贴在墙上长石头
       rocks.push({ x: x, y: y, r: r });
     }
 
-    if(paths.length){
+    if(paths.length&&!landmarks){
       // Sparse collidable trunks; foliage is decorative and never blocks movement.
       for(var ti=0;ti<150&&trees.length<25;ti++){
         var tx=110+Math.random()*(W-220),ty=110+Math.random()*(H-220),tr=12;
@@ -116,9 +124,29 @@
         var tree={x:tx,y:ty,r:tr,tree:true,crown:34+Math.random()*12};trees.push(tree);rocks.push(tree);
       }
     }
+    function nearLandmark(x,y,r){
+      if(!landmarks)return false;
+      var sites=[landmarks.altar,landmarks.well,landmarks.ancientTree].concat(landmarks.houses);
+      return sites.some(function(o){return Math.hypot(x-o.x,y-o.y)<r+(o.w||110);});
+    }
+    if(landmarks){
+      // Short, convex footprints: no enclosed rooms or pockets for enemies to get stuck in.
+      landmarks.houses.forEach(function(h){walls.push({x1:h.x-h.w*.32,y1:h.y,x2:h.x+h.w*.32,y2:h.y,r:h.h*.38,ruin:true});
+      });
+      rocks.push({x:landmarks.well.x,y:landmarks.well.y,r:26,landmark:true});
+      rocks.push({x:landmarks.ancientTree.x,y:landmarks.ancientTree.y,r:35,landmark:true});
+      for(var bi=0;bi<180&&landmarks.bamboo.length<34;bi++){
+        var bx=W*(.68+((bi*37)%101)/101*.24),by=H*(.24+((bi*53)%103)/103*.53);
+        if(nearPath(bx,by,22)||nearWall(walls,bx,by,25))continue;
+        if(rocks.some(function(o){return Math.hypot(o.x-bx,o.y-by)<o.r+45;}))continue;
+        landmarks.bamboo.push({x:bx,y:by,height:65+bi%4*12});
+        rocks.push({x:bx,y:by,r:9,landmark:true});
+      }
+    }
     /* 缺口（墙上的"门"）列表：怪撞墙时会改道去最近的那个。
        有了它，怪不需要寻路也能穿过地形：绕过不去就奔门，门是唯一的通路。 */
     var gaps = [];
+    if(landmarks)landmarks.houses.forEach(function(h){[-1,1].forEach(function(sign){gaps.push({x:h.x+sign*(h.w*.5+70),y:h.y});});});
     corridors.forEach(function(c){[-1,1].forEach(function(sign){gaps.push({x:c.x+c.ux*150*sign,y:c.y+c.uy*150*sign});});});
     for (var gj = 0; gj < wallDefs.length; gj++) {
       var gwd = wallDefs[gj], gV = gwd.dir === 'v';
@@ -133,6 +161,7 @@
       w: W,
       h: H,
       stage: stageIdx || 1,
+      landmarks: landmarks,
       stageName: (st && st.name) || '荒原',
       paths: paths, trees: trees, corridors:corridors,
       ground: ground,               // 这一关的地面配色（渲染层用）

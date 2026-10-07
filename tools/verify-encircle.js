@@ -7,7 +7,7 @@ for(let iteration=0;iteration<20;iteration++){
  const g=make(),P=g.player;
  /* 第 1 波教学 gate（2026-10）：不先"学会技能"就不会刷怪群 —— 本用例量的是包围/密度，先放行。 */
  g.trial.skillTaken=true;assert(Math.abs((P.x-g.cam.x)*cfg.camera.zoom-406)<1e-6);assert(Math.abs((P.y-g.cam.y)*cfg.camera.zoom-187.5)<1e-6);
- assert(g.world.trees.length>=15);assert.equal(g.world.paths.length,11);assert.equal(g.world.walls.length,4);
+ assert(g.world.landmarks.bamboo.length>=15);assert.equal(g.world.landmarks.houses.length,5);assert.equal(g.world.paths.length,11);assert.equal(g.world.walls.filter(w=>w.corridor).length,4);
  for(const road of g.world.paths)for(let i=0;i<=30;i++){const t=i/30;assert(g.world.isFree(road.x1+(road.x2-road.x1)*t,road.y1+(road.y2-road.y1)*t,P.r+12),'road obstructed');}
  g.updateSpawns(.7);assert(g.foes.length>=8,'initial squads too small');
  for(let i=0;i<100;i++)g.updateSpawns(.1);

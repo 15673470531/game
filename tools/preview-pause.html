@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>暂停面板 →「武器库」（2026-10）</title>
+<style>*{margin:0;padding:0}html,body{background:#0d0f12}canvas{display:block}</style>
+</head>
+<body>
+<!--
+  首页摘掉「武器图鉴」+ 暂停面板加「武器库」的 1:1 对照图（2026-10）。
+
+  六格：
+    ① 首页底部按钮排：回到 3 个（游戏介绍 / 玩法说明 / 开局：长剑）—— 「武器图鉴」已摘
+    ② 暂停面板 · 开局一把武器：第一行「武器库」+ 音乐/音效/震动 并成一行三个小开关
+    ③ 暂停面板 · 手里两把武器（行数/版式完全一样，只是进去以后能换）
+    ④ 暂停面板 · 横屏刘海机（左右各 44 安全区）
+    ⑤ 武器库「武器」页（一把武器：那张卡亮着，点空白关掉）
+    ⑥ 武器库「技能」页：上 = 技能、下 = **熟练度**（2026-10 从首页图鉴搬进来）——
+       「武器图鉴」的入口摘掉之后，这里就是它唯一的家
+
+  ⚠️ 画的是**真渲染器 + 真 game 对象**（Renderer.draw / drawPausePanel / drawBagPanel），
+     不是手绘示意：改了 pauseRects / pauseSwitchRects / drawSwitchRow，重跑一次就是最新样子。
+
+  用法：bash tools/shot-boss.sh pause      产出 docs/pause-bag.png
+-->
+<canvas id="out" width="812" height="1250"></canvas>
+<script src="../core/config.js"></script>
+<script src="../core/world.js"></script>
+<script src="../core/entities.js"></script>
+<script src="../core/progression.js"></script>
+<script src="../core/save.js"></script>
+<script src="../core/game.js"></script>
+<script src="../render/renderer.js"></script>
+<script>
+(function () {
+  try {
+  var G = window.__GAME__;
+  if (!G || !G.Game) { document.title = 'NO_ENGINE'; return; }
+  var W = 812, H = 375, CAP = 26;
+  var NOINS = { top: 0, left: 0, right: 0, bottom: 0 };
+  var NOTCH = { top: 0, left: 44, right: 44, bottom: 21 };   // 横屏刘海机
+
+  function mkScene(setup, insets) {
+    var g = new G.Game(G.Config, { World: G.World, Entities: G.Entities, Progression: G.Progression, Save: G.Save });
+    g.setViewport(W, H, insets || NOINS);
+    g.state = 'play';
+    g.hint = '';
+    g.cam.x = 0; g.cam.y = 0;
+    var P = g.player;
+    P.x = 430; P.y = 210; P.hp = P.stats.maxhp * 0.8; P.kills = 128; P.gold = 86;
+    g.foes.length = 0;
+    for (var i = 0; i < 7; i++) {
+      var a = i / 7 * Math.PI * 2;
+      g.foes.push(G.Entities.makeFoe(G.Config, i % 3 === 0 ? 'tank' : 'slime',
+        P.x + Math.cos(a) * (120 + i * 14), P.y + Math.sin(a) * (80 + i * 10), 1, 1));
+    }
+    if (setup) setup(g, P);
+    return g;
+  }
+  function giveSecond(g) {
+    var w = G.Progression.makeDefaultWeapon(G.Config);
+    w.id = 'pv-w2'; w.kind = 'spear'; w.name = G.Config.weapons.spear.name;
+    g.player.bag = [g.player.bag[0], w];
+  }
+
+  var cases = [];
+
+  /* ① 首页：底部那排回到 3 个 —— 原来第 4 个「武器图鉴」那块位置现在是「开局：长剑」 */
+  cases.push({ title: '① 首页：底部按钮排 3 个（游戏介绍 / 玩法说明 / 开局：长剑）——「武器图鉴」已摘掉', insets: NOINS,
+    g: mkScene(function (g) { g.state = 'title'; g.pendingResume = null; }) });
+
+  /* ② 暂停面板 · 开局一把武器：第一行「武器库」恒显 + 三个开关并一行（这就是新版式） */
+  cases.push({ title: '② 暂停面板 · 开局一把武器：第一行「武器库」（恒显）+ 音乐/音效/震动 并成一行三个小开关', insets: NOINS,
+    g: mkScene(function (g) { g.pause(); }) });
+
+  /* ③ 手里两把武器：行数、版式一模一样（进去以后才有得换） */
+  cases.push({ title: '③ 暂停面板 · 手里两把武器（版式和②完全一样，只是进武器库后能换）', insets: NOINS,
+    g: mkScene(function (g) { giveSecond(g); g.pause(); }) });
+
+  /* ④ 横屏刘海机：面板整体在安全区内，不压左右刘海、不压底部横条 */
+  cases.push({ title: '④ 暂停面板 · 横屏刘海机（左右各 44 / 底部 21）：面板不许压到安全区', insets: NOTCH,
+    g: mkScene(function (g) { giveSecond(g); g.pause(); }, NOTCH) });
+
+  /* ⑤ 武器库「武器」页：一把武器时就是一张卡亮着（点空白关掉，关掉回暂停面板） */
+  cases.push({ title: '⑤ 武器库「武器」页（一把武器）：点空白关掉 —— 关掉回的是**暂停面板**不是直接续打', insets: NOINS,
+    g: mkScene(function (g) {
+      g.state = 'bag'; g.bagTab = 'weapon'; g.bagGuard = 0;
+      g.skillViewKind = (g.weaponKind && g.weaponKind()) || 'sword';
+    }) });
+
+  /* ⑥ 武器库「技能」页：**2026-10 起只有技能一块**（熟练度奖励已拆到「熟练度」页） */
+  cases.push({ title: '⑥ 武器库「技能」页：只有技能（长剑 3 张，一行一张）—— 熟练度已拆到「熟练度」页', insets: NOINS,
+    g: mkScene(function (g) {
+      g.state = 'bag'; g.bagTab = 'skills'; g.bagGuard = 0;
+      g.skillViewKind = (g.weaponKind && g.weaponKind()) || 'sword';
+    }) });
+
+  /* ⑦⑧⑨ 武器库「熟练度」页（= 熟练度奖励）：2026-10 从技能页下半块拆出来独立成页。
+     三种状态各一格，专门检查"留白会不会看着像坏了"和"进度条/达成色"：
+       ⑦ 长剑 Lv1（0 点，刚起步）  ⑧ 长剑 Lv2（450 点，进度条半条、Lv1 绿 Lv2 金）
+       ⑨ 双刀（奖励内容还没配 → 每级留白，不写"待开发"） */
+  function masteryCase(pts, title) {
+    return { title: title, insets: NOINS,
+      g: mkScene(function (g) {
+        g.state = 'bag'; g.bagTab = 'mastery'; g.bagGuard = 0;
+        g.skillViewKind = (g.weaponKind && g.weaponKind()) || 'sword';
+        if (pts) g.player.mastery = { sword: pts };
+      }) };
+  }
+  cases.push(masteryCase(0, '⑦ 武器库「熟练度」页 · 长剑 Lv1（0 点）：顶部进度 + 每级一行（这一级金框）'));
+  cases.push(masteryCase(450, '⑧ 武器库「熟练度」页 · 长剑 Lv2（450 点）：已达成的绿、当前的这级金'));
+  cases.push({ title: '⑨ 武器库「熟练度」页 · 双刀（奖励还没配）：每级留白 —— 不许写"待开发"，也不许看着像画崩了', insets: NOINS,
+    g: mkScene(function (g) {
+      g.state = 'bag'; g.bagTab = 'mastery'; g.bagGuard = 0; g.skillViewKind = 'dagger';
+    }) });
+
+  var outCv = document.getElementById('out');
+  var off = document.createElement('canvas'); off.width = W; off.height = H;
+  var offCtx = off.getContext('2d');
+  var R = new G.Renderer(offCtx, {
+    cfg: G.Config,
+    createCanvas: function (w, h) { var c = document.createElement('canvas'); c.width = w; c.height = h; return c; },
+    hint: '', restartHint: ''
+  });
+  R.resize(W, H);
+
+  var ctx = outCv.getContext('2d');
+  outCv.width = W; outCv.height = cases.length * (H + CAP) + 6;
+  ctx = outCv.getContext('2d');       // ⚠️ 改 width/height 会清空画布并重置 ctx 状态
+  ctx.font = '600 13px "PingFang SC","Microsoft YaHei",monospace';
+
+  for (var i = 0; i < cases.length; i++) {
+    var cy = 6 + i * (H + CAP);
+    ctx.fillStyle = '#cfe9a8';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillText(cases[i].title, 6, cy + CAP - 8);
+    R.lastT = 1.0; R.dt = 1 / 60;
+    R.setInsets(cases[i].insets || NOINS);
+    R.setMenuReserve({ top: 0 });
+    cases[i].g.setMenuReserve({ top: 0 });
+    R.draw(cases[i].g, 1.0);
+    ctx.drawImage(off, 0, cy + CAP);
+    ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.lineWidth = 1;
+    ctx.strokeRect(0.5, cy + CAP + 0.5, W - 1, H - 1);
+  }
+
+  document.title = 'READY ' + outCv.width + 'x' + outCv.height;
+  } catch (e) {
+    document.title = 'ERR: ' + (e && e.message ? e.message : e);
+  }
+})();
+</script>
+</body>
+</html>

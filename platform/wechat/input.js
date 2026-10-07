@@ -71,7 +71,7 @@ TouchInput.prototype._bind = function () {
          升级卡的右下角是重叠的 —— 不然点冲刺会把右边那张卡选走。试炼场的按钮是居中的两排，
          够不到右下角（实测 x ≤ 629 vs 冲刺键 x ≥ 668），所以排除按钮不会误伤它们。
          剩下的手指才记成"点选候选"：能不能算点选还要等抬手时看时长和位移（见 end()）。 */
-      if (inBtn(t, self.btnDash)) { self.dash = true; self.dashId = t.identifier; continue; }
+      if (self.playing !== false && inBtn(t, self.btnDash)) { self.dash = true; self.dashId = t.identifier; continue; }
       self._tapCand = { id: t.identifier, x: t.clientX, y: t.clientY, t: Date.now() };
 
       if (t.clientX < S.width * 0.5 && !self.stick.active) {
@@ -125,6 +125,7 @@ TouchInput.prototype._bind = function () {
 };
 
 TouchInput.prototype.read = function (game) {
+  this.playing = !game || game.state === 'play';
   var mx = 0, my = 0;
   if (this.stick.active) {
     var dx = (this.stick.x - this.stick.ox) / STICK_RADIUS;

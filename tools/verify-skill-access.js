@@ -1,0 +1,13 @@
+'use strict';
+const assert=require('assert'),cfg=require('../core/config'),Game=require('../core/game');
+const deps={World:require('../core/world'),Entities:require('../core/entities'),Progression:require('../core/progression'),Save:require('../core/save')};
+const g=new Game(cfg,deps);g.setViewport(812,375);
+for(const kind of Object.keys(cfg.weapons).filter(k=>k!=='sword'))assert(g.weaponSkillRows(kind).every(r=>!r.owned&&r.status==='未解锁 · 先获得对应武器'));
+const gated=cfg.upgrades.find(c=>c.weapon==='sword'&&c.masteryMin);assert(gated);
+assert(g.weaponSkillRows('sword').find(r=>r.id===gated.id).status.startsWith('未解锁'));
+g.player.mastery.sword=cfg.mastery.levels[gated.masteryMin-1];g.player.taken[gated.id]=1;
+g.homeLibrary=true;assert.equal(g.weaponSkillRows('sword').find(r=>r.id===gated.id).status,'可获取 · 局内精英掉落');
+g.homeLibrary=false;assert(g.weaponSkillRows('sword').find(r=>r.id===gated.id).owned);
+const saved=JSON.parse(JSON.stringify(deps.Save.snapshot(g,false))),next=new Game(cfg,deps);deps.Save.applyMeta(next,saved,cfg.save.keepOnDeath);
+assert.equal(next.masteryOf('sword'),g.masteryOf('sword'));assert(!next.player.taken[gated.id]);assert.equal(next.weaponSkillRows('sword').find(r=>r.id===gated.id).status,'可获取 · 局内精英掉落');
+console.log('Skill access: unowned weapons, mastery gate, home versus run, and permanent eligibility without carrying run skills passed.');

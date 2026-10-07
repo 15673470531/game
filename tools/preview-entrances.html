@@ -1,0 +1,11 @@
+<!doctype html><meta charset="utf-8"><title>Loading</title><style>body{margin:0;background:#0b141b}canvas{display:block;margin-bottom:8px}</style><body>
+<script src="../core/config.js"></script><script src="../core/world.js"></script><script src="../core/entities.js"></script><script src="../core/progression.js"></script><script src="../core/save.js"></script><script src="../core/game.js"></script><script src="../core/entrances.js"></script><script src="../render/renderer.js"></script><script>
+try {var G=window.__GAME__;
+['well','house','chamber','rift'].forEach(function(kind){
+ var g=new G.Game(G.Config,{World:G.World,Entities:G.Entities,Progression:G.Progression,Save:G.Save});g.setViewport(812,375);var e=new G.Entrances(g,function(){return true});g.startRun(false);e.ensureSites();var site=e.sites.find(function(s){return s.kind===kind;});
+ var f;if(kind==='rift'){g.wave=3;var pos=e.point(site,70);f=G.Entities.makeBoss(G.Config,pos.x,pos.y,1,'warden',1);g.foes.push(f);e.mark(f,site,false);g.stageBossPending=true;}
+ else {e.forcedSite=site;g.spawnTrialFoe(kind==='chamber');e.forcedSite=null;f=g.foes[0];}
+ g.player.x=site.x-180;g.player.y=site.y+120;g.updateCamera();e.afterUpdate();e.beforeUpdate(kind==='rift'?1.35:1.5);
+ var cv=document.createElement('canvas');cv.width=812;cv.height=375;document.body.appendChild(cv);var r=new G.Renderer(cv.getContext('2d'),{cfg:G.Config,createCanvas:function(w,h){var c=document.createElement('canvas');c.width=w;c.height=h;return c;}});r.resize(812,375);r.draw(g,4);
+});document.title='READY';}catch(err){document.title='ERR '+err.stack;}
+</script>

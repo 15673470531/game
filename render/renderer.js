@@ -173,7 +173,7 @@
     var roads=world.paths||[];
     g.lineCap='round';g.lineJoin='round';
     for(var layer=0;layer<2;layer++){
-      g.strokeStyle=layer?'rgba(160,137,88,.30)':'rgba(112,98,60,.5)';g.lineWidth=layer?48:66;
+      g.strokeStyle=world.landmarks?(layer?'rgba(162,171,154,.22)':'rgba(101,117,109,.48)'):(layer?'rgba(160,137,88,.30)':'rgba(112,98,60,.5)');g.lineWidth=layer?48:66;
       for(var ri=0;ri<roads.length;ri++){var road=roads[ri];g.beginPath();g.moveTo(road.x1,road.y1);g.lineTo(road.x2,road.y2);g.stroke();}
     }
     for(var di=0;di<1400;di++){
@@ -186,15 +186,177 @@
       for(var li=0;li<16;li++){var la=li*2.4,lr=18+(li%5)*8;g.fillStyle=li%2?'#77843c':'#9a8945';g.beginPath();g.ellipse(tree.x+Math.cos(la)*lr,tree.y+Math.sin(la)*lr*.6,3,1.4,la,0,7);g.fill();}
     }
 
+    if(!world.landmarks){
     g.fillStyle = 'rgba(52,96,120,.75)';
     g.beginPath(); g.ellipse(1900 * sx, 1250 * sy, 240 * sx, 150 * sy, -0.3, 0, 7); g.fill();
     g.strokeStyle = 'rgba(150,200,220,.35)'; g.lineWidth = 5; g.stroke();
 
+    }
+    if(world.landmarks)this.drawRealmBase(g,world);
     g.strokeStyle = 'rgba(20,30,18,.85)'; g.lineWidth = 26;
     g.strokeRect(0, 0, world.w, world.h);
 
     this.ground = c;
     this.groundWorld = world;
+  };
+
+  // Static stonework is cached with the ground; only lamps, seals and motes animate.
+  Renderer.prototype.drawRealmBase = function(g,world){
+    var L=world.landmarks,A=L.altar;
+    function ellipse(x,y,rx,ry,color){g.fillStyle=color;g.beginPath();g.ellipse(x,y,rx,ry,0,0,Math.PI*2);g.fill();}
+    ellipse(A.x,A.y+10,190,135,'rgba(10,22,29,.36)');
+    for(var ring=3;ring>=0;ring--){ellipse(A.x,A.y+ring*3,164+ring*9,112+ring*7,ring%2?'#45575a':'#64716e');}
+    ellipse(A.x,A.y,148,99,'#394d53');
+    g.strokeStyle='#87928a';g.lineWidth=2;
+    for(var k=0;k<12;k++){var a=k*Math.PI/6;g.beginPath();g.moveTo(A.x+Math.cos(a)*151,A.y+Math.sin(a)*103);g.lineTo(A.x+Math.cos(a)*188,A.y+Math.sin(a)*131);g.stroke();}
+    g.strokeStyle='#75928d';g.lineWidth=1.5;
+    [52,88,126].forEach(function(radius){g.beginPath();g.ellipse(A.x,A.y,radius,radius*.68,0,0,7);g.stroke();});
+    for(var k=0;k<6;k++){var a=k*Math.PI/3;g.beginPath();g.moveTo(A.x+Math.cos(a)*87,A.y+Math.sin(a)*59);g.lineTo(A.x+Math.cos(a+Math.PI*2/3)*87,A.y+Math.sin(a+Math.PI*2/3)*59);g.stroke();}
+    // Weathered stairs on the south side; all altar stonework remains walkable.
+    for(var k=0;k<4;k++){g.fillStyle=k%2?'#637371':'#4a5e60';g.fillRect(A.x-42-k*6,A.y+119+k*9,84+k*12,8);}
+    [[-157,-75],[157,-75],[-176,61],[176,61]].forEach(function(o,i){
+      var x=A.x+o[0],y=A.y+o[1],h=i===1?27:47;
+      ellipse(x+8,y+5,23,12,'rgba(8,19,25,.35)');g.fillStyle='#394c54';g.fillRect(x-12,y-h,24,h);
+      g.fillStyle='#6c7d7b';g.beginPath();g.moveTo(x-15,y-h);g.lineTo(x+3,y-h-7);g.lineTo(x+16,y-h-2);g.lineTo(x+12,y-h+5);g.closePath();g.fill();
+      g.strokeStyle='#78949b';g.beginPath();g.moveTo(x-3,y-h+12);g.lineTo(x+3,y-10);g.stroke();
+    });
+    // Cracked flagstones connect the well and abandoned doorsteps to the old roads.
+    L.houses.concat([L.well]).forEach(function(h,i){
+      for(var n=0;n<6;n++){var x=h.x+Math.sin(n*2+i)*13,y=h.y+40+n*16;g.fillStyle=n%2?'#64726a':'#53645e';g.fillRect(x-10,y,19,9);}
+      for(var n=0;n<12;n++){var a=n*2.4;ellipse(h.x+Math.cos(a)*(50+n*3),h.y+Math.sin(a)*(35+n*2),3+n%4,2,'#66766a');}
+    });
+    var T=L.ancientTree;
+    g.strokeStyle='#435c58';g.lineCap='round';
+    for(var n=0;n<7;n++){g.lineWidth=9-n*.6;g.beginPath();g.moveTo(T.x+(n-3)*5,T.y);g.bezierCurveTo(T.x+(n-3)*28,T.y+65,T.x+(n-3)*38,T.y+105,T.x+(n-3)*55,T.y+160);g.stroke();}
+    // Dry channel in the southeast, with stepping stones rather than a deceptive water obstacle.
+    g.strokeStyle='rgba(23,47,56,.65)';g.lineWidth=45;g.beginPath();g.moveTo(world.w*.77,world.h*.81);g.bezierCurveTo(world.w*.83,world.h*.85,world.w*.91,world.h*.7,world.w*.96,world.h*.8);g.stroke();
+    for(var n=0;n<7;n++)ellipse(world.w*.80+n*22,world.h*.81-n*5,12,6,'#748583');
+  };
+
+  Renderer.prototype.drawRealmScene = function(game,t){
+    var L=game.world.landmarks;if(!L)return;
+    var c=this.ctx,A=L.altar,T=L.ancientTree,Q=game.trial||{},wave=game.wave;
+    var settled=!!Q.finished,wellOn=wave===2&&!Q.eliteDead,riftOn=wave>=3&&!settled;
+    function oval(x,y,rx,ry,color){c.fillStyle=color;c.beginPath();c.ellipse(x,y,rx,ry,0,0,7);c.fill();}
+    function line(points,color,width){c.strokeStyle=color;c.lineWidth=width;c.beginPath();points.forEach(function(p,i){if(i)c.lineTo(p[0],p[1]);else c.moveTo(p[0],p[1]);});c.stroke();}
+    function glow(x,y,r,color){c.save();c.globalAlpha*=.22;for(var k=4;k>0;k--)oval(x,y,r*k/4,r*k/4,color);c.restore();}
+    function lamp(x,y,purple){glow(x,y,30,purple?'rgba(182,130,230,.25)':'rgba(246,190,103,.26)');c.fillStyle='#26383b';c.fillRect(x-6,y-8,12,17);c.fillStyle=purple?'#c4a2ed':'#e8c086';c.fillRect(x-4,y-5,8,10);}
+    c.save();c.lineJoin='round';c.lineCap='round';
+    // Altar light reflects actual tutorial and wave progress, including restored saves.
+    c.strokeStyle=settled?'rgba(155,228,207,.7)':Q.skillTaken||wave>1?'rgba(119,200,208,.44)':'rgba(134,178,185,.22)';c.lineWidth=2;
+    c.beginPath();c.ellipse(A.x,A.y,126,85,0,0,7);c.stroke();
+    for(var k=0;k<12;k++){var a=k*Math.PI/6,x=A.x+Math.cos(a)*112,y=A.y+Math.sin(a)*76;
+      line([[x-3,y-5],[x+3,y],[x-2,y+6]],c.strokeStyle,2);}
+    L.houses.forEach(function(h,i){
+      var x=h.x,y=h.y,w=h.w,hh=h.h;
+      oval(x+12,y+10,w*.65,hh*.6,'rgba(9,20,27,.3)');
+      c.fillStyle='#58625a';c.fillRect(x-w/2,y-hh*.6,w,hh*.85);
+      c.fillStyle='#38494a';c.fillRect(x+w*.32,y-hh*.6,w*.18,hh*.85);
+      c.fillStyle='#24373a';c.fillRect(x-w*.12,y-hh*.18,23,hh*.43);
+      // Broken roof silhouette and exposed rafters.
+      c.fillStyle='#34464c';c.beginPath();c.moveTo(x-w*.62,y-hh*.55);c.lineTo(x-w*.2,y-hh*1.1);c.lineTo(x+w*.22,y-hh*.94);c.lineTo(x+w*.15,y-hh*.65);c.lineTo(x+w*.42,y-hh*.76);c.lineTo(x+w*.59,y-hh*.35);c.closePath();c.fill();
+      line([[x-w*.62,y-hh*.55],[x-w*.2,y-hh*1.1],[x+w*.22,y-hh*.94]],'#73827b',3);
+      for(var j=0;j<5;j++)line([[x-w*.42+j*w*.17,y-hh*.63],[x-w*.23+j*w*.13,y-hh*.88]],'#506568',2);
+      line([[x+w*.23,y-hh*.56],[x+w*.43,y-hh*.29],[x+w*.32,y-hh*.07]],'#2b3c3d',2);
+      c.fillStyle='#435d4d';c.fillRect(x-w*.49,y+hh*.17,w*.38,6);
+      lamp(x-w*.27,y-hh*.2,wave>=2&&!settled);
+      for(var j=0;j<3;j++){var fx=x-w*.6+j*14,fy=y+hh*.55;line([[fx,fy],[fx-3,fy-19]],'#7d8070',3);}
+      line([[x-w*.6-3,y+hh*.55-11],[x-w*.6+32,y+hh*.55-7]],'#6c7768',3);
+    });
+    var W=L.well;
+    oval(W.x+7,W.y+10,39,22,'rgba(8,20,26,.4)');oval(W.x,W.y,33,23,'#778782');
+    c.fillStyle='#4c6465';c.fillRect(W.x-32,W.y,64,19);oval(W.x,W.y+18,32,15,'#4c6465');
+    oval(W.x,W.y,26,17,'#172b38');oval(W.x,W.y+2,18,10,wellOn?'#6d568c':'#293a48');
+    for(var i=0;i<8;i++){var a=i*Math.PI/4;line([[W.x+Math.cos(a)*26,W.y+Math.sin(a)*17],[W.x+Math.cos(a)*33,W.y+Math.sin(a)*23]],'#a1aaa0',2);}
+    line([[W.x-36,W.y+5],[W.x-36,W.y-49],[W.x+36,W.y-49],[W.x+36,W.y+5]],'#7b7765',5);
+    line([[W.x,W.y-49],[W.x+3,W.y-5]],'#b1a487',2);
+    if(wellOn){glow(W.x,W.y-8,60,'rgba(174,126,229,.28)');for(var i=0;i<6;i++){var u=(t*.25+i/6)%1;oval(W.x+Math.sin(i*3+t)*16,W.y-u*65,2,3,'rgba(203,172,239,'+(1-u)*.7+')');}}
+    // Bamboo foliage stays behind combat silhouettes and warning shapes.
+    L.bamboo.forEach(function(b,i){for(var j=0;j<3;j++){
+      var x=b.x+(j-1)*12,y=b.y,h=b.height-j*9;
+      line([[x,y],[x+(j-1)*6,y-h]],j===1?'#6a9680':'#477663',4);
+      for(var n=1;n<5;n++){var yy=y-h*n/5;line([[x-3,yy],[x+3,yy]],'#aac0a1',1);
+        if(n>2){line([[x,yy],[x+22,yy-10]],'#598976',2);oval(x+17,yy-8,10,2,'#749c80');line([[x,yy-7],[x-21,yy-19]],'#598976',2);oval(x-16,yy-17,9,2,'#658e79');}}
+    }});
+    // An ancient, hollow tree; roots are scenery, only the narrow trunk collides.
+    oval(T.x+20,T.y+5,110,37,'rgba(10,21,29,.28)');
+    line([[T.x-18,T.y],[T.x-8,T.y-65],[T.x-35,T.y-125],[T.x-22,T.y-175]],'#596e69',30);
+    line([[T.x+15,T.y],[T.x+22,T.y-70],[T.x+5,T.y-130]],'#6c7b70',22);
+    [[-95,-146],[-115,-91],[84,-161],[116,-107],[43,-205]].forEach(function(v,i){line([[T.x,T.y-67],[T.x+v[0]*.55,T.y+v[1]*.75],[T.x+v[0],T.y+v[1]]],'#647c73',10-i);line([[T.x+v[0]*.65,T.y+v[1]*.8],[T.x+v[0]*.9+17,T.y+v[1]-27]],'#718379',4);});
+    oval(T.x+2,T.y-33,12,28,'#263c40');
+    for(var i=0;i<5;i++){var x=T.x-85+i*40,y=T.y-90-Math.sin(i*2)*30;line([[x,y-23],[x,y]],'#8e9883',1);lamp(x,y,riftOn);}
+    if(riftOn){for(var i=0;i<5;i++){var x=T.x+(i-2)*49;line([[x,T.y+42],[x+12,T.y+70],[x-5,T.y+95],[x+20,T.y+134]],'rgba(177,136,207,.58)',2);}glow(T.x,T.y+60,120,'rgba(145,101,183,.1)');}
+    // Sparse ambient wisps, never full-screen fog over the combat layer.
+    for(var i=0;i<18;i++){var x=game.world.w*(.08+(i*37%89)/100),y=game.world.h*(.13+(i*29%73)/100)-Math.sin(t*.6+i)*7;oval(x,y,1.5,1.5,'rgba(174,222,209,.42)');}
+    c.restore();
+  };
+
+  // Environmental entrances are drawn in world space, behind the combat silhouettes.
+  Renderer.prototype.drawChapterEntrances=function(game,t){
+    var e=game.entrances;if(!e||!e.enabled())return;e.ensureSites();var c=this.ctx,d=e.data(),active=game.entranceScene;
+    function oval(x,y,rx,ry,color){c.fillStyle=color;c.beginPath();c.ellipse(x,y,rx,ry,0,0,7);c.fill();}
+    function line(points,color,width){c.strokeStyle=color;c.lineWidth=width;c.beginPath();points.forEach(function(p,i){if(i)c.lineTo(p[0],p[1]);else c.moveTo(p[0],p[1]);});c.stroke();}
+    if(active&&active.kind==='boss'&&active.time<1.6){var altar=game.world.landmarks.altar;c.save();c.globalAlpha=.25+.45*Math.pow(Math.sin(active.time*5),2);c.strokeStyle='#efcd8d';c.lineWidth=4;c.beginPath();c.ellipse(altar.x,altar.y,126,85,0,0,7);c.stroke();c.restore();}
+    e.sites.forEach(function(s){
+      if(!e.g||Math.abs(s.x-game.player.x)>4000)return;
+      var a=active&&active.site.id===s.id?active:null,foes=game.foes.filter(function(f){return f.arrival&&f.arrival.site.id===s.id&&f.arrival.elapsed<f.arrival.total;});
+      var moving=!!a||foes.length>0,age=a?a.time:foes.length?foes[0].arrival.elapsed:0,open=clampEntrance((age-.45)/.8),shake=moving?Math.sin(age*39)*2*(1-open):0;
+      var x=s.x,y=s.y;c.save();c.lineCap='round';
+      if(s.kind==='house'){
+        var opened=!!(d.opened&&d.opened[s.id]);
+        if(!opened||moving){c.save();c.translate(x-10+shake,y-12);c.rotate(open*1.22);c.fillStyle='#514a3c';c.fillRect(0,0,22,36);line([[5,1],[5,34]],'#827761',2);line([[16,1],[16,34]],'#292b28',2);line([[1,7],[21,9]],'#777762',3);c.restore();}
+        else {c.fillStyle='#494939';c.fillRect(x-12,y+30,30,8);}
+        if(moving&&open<.7){oval(x-4,y+6,2,1.5,'#dec58c');oval(x+4,y+6,2,1.5,'#dec58c');}
+      }else if(s.kind==='well'){
+        if(moving){
+          oval(x,y+3,23,13,'rgba(4,9,15,.84)');
+          for(var side=-1;side<=1;side+=2){var reach=Math.sin(clampEntrance(age/.8)*Math.PI/2)*19;line([[x+side*10,y+7],[x+side*21,y-reach],[x+side*30,y+2]],'#101b24',6);line([[x+side*10,y+5],[x+side*21,y-reach],[x+side*30,y]],'#9a9274',2);}
+        }
+      }else if(s.kind==='chamber'){
+        var opened=!!d.seen['elite-1']||!!d.seen['elite-2'],gap=moving?open:opened?1:0;
+        oval(x+8,y+15,70,32,'rgba(5,14,20,.42)');
+        c.fillStyle='#35494c';c.fillRect(x-60,y-64,120,88);c.fillStyle='#63716a';c.fillRect(x-66,y-67,132,15);
+        c.fillStyle='#12232c';c.fillRect(x-32,y-52,64,75);
+        [-1,1].forEach(function(side){var dx=side*(17+gap*24)+shake;c.fillStyle=side<0?'#56635e':'#455650';c.fillRect(x+dx-15,y-51,30,74);line([[x+dx-4,y-45],[x+dx+3,y-23],[x+dx-5,y-3],[x+dx+2,y+16]],'#2a3a3d',2);});
+        for(var i=0;i<3;i++){c.fillStyle=i%2?'#53645e':'#728075';c.fillRect(x-42-i*6,y+24+i*9,84+i*12,8);}
+        if(moving)line([[x,y-43],[x,y+17]],'rgba(217,181,113,'+(.3+.3*Math.sin(age*7))+')',2);
+      }else if(s.kind==='rift'){
+        var sealed=game.trial&&game.trial.finished,close=sealed?Math.max(0,1-((game.victoryScene?game.victoryScene.age:6)-1)/3):1;
+        var broken=!!d.seen['boss-3'],spread=moving?Math.max(.15,open):broken?1:.12;
+        for(var k=0;k<9;k++){var angle=k*2.4,rx=Math.cos(angle),ry=Math.sin(angle)*.6;line([[x,y],[x+rx*45*spread,y+ry*45*spread],[x+rx*85*spread+7,y+ry*85*spread-6],[x+rx*118*spread,y+ry*118*spread]],'#111c22',moving?4:2);}
+        if(broken&&close>0){oval(x,y,65*spread*close,36*spread*close,'#111b20');oval(x,y+4,48*spread*close,22*spread*close,'#080f16');}
+        if(a&&a.time>.35&&a.time<1.45){var rise=Math.sin(clampEntrance((a.time-.35)/1.1)*Math.PI)*38;
+          [-1,1].forEach(function(side){line([[x+side*33,y+10],[x+side*55,y-rise],[x+side*76,y-rise-14]],'#4a444a',13);line([[x+side*76,y-rise-14],[x+side*68,y-rise-30]],'#a9a08c',4);});
+        }
+      }
+      if(moving){
+        for(var n=0;n<14;n++){var p=(age*.8+n*.137)%1,ang=n*2.399,r=18+p*(s.kind==='rift'?100:48);oval(x+Math.cos(ang)*r,y+12+Math.sin(ang)*r*.35-p*26,3+p*7,2+p*4,'rgba(168,155,123,'+((1-p)*.26)+')');}
+        if(a&&a.kind==='boss'&&a.time>.7&&a.time<1.5)for(var n=0;n<12;n++){var u=(a.time-.7)/.8,ang=n*2.4;c.fillStyle=n%2?'#788079':'#434f50';c.fillRect(x+Math.cos(ang)*u*105,y+Math.sin(ang)*u*45-Math.sin(u*Math.PI)*55,5+n%4,4+n%3);}
+      }
+      c.restore();
+    });
+  };
+  Renderer.prototype.drawDawn=function(game,t){
+    if(!game.trial||!game.trial.finished||!game.world.landmarks)return;
+    var c=this.ctx,A=game.world.landmarks.altar,age=game.victoryScene?game.victoryScene.age:6,p=clampEntrance((age-.6)/3);
+    c.save();
+    var fallen=game.victoryScene&&game.victoryScene.fallen;if(fallen&&age<2){c.save();c.globalAlpha=1-age/2;c.translate(fallen.x,fallen.y);c.scale(1,1-age*.3);c.translate(-fallen.x,-fallen.y);this.drawFoes([fallen],t);c.restore();}
+    var glow=c.createRadialGradient(A.x,A.y,10,A.x,A.y,290);glow.addColorStop(0,'rgba(255,195,85,'+(p*.33)+')');glow.addColorStop(1,'rgba(255,175,65,0)');c.fillStyle=glow;c.fillRect(A.x-300,A.y-300,600,600);
+    for(var k=0;k<3;k++){c.globalAlpha=p*(.65-k*.13);c.strokeStyle='#f9cc80';c.lineWidth=3-k*.6;c.beginPath();c.ellipse(A.x,A.y,40+k*40,27+k*26,0,0,Math.PI*2*clampEntrance((age-1-k*.45)/1.2));c.stroke();}
+    c.globalAlpha=p;
+    for(var j=0;j<3;j++){c.fillStyle=['#b9642d','#ffc65f','#fff2bd'][j];c.beginPath();c.ellipse(A.x+Math.sin(t*3+j)*3,A.y-64-j*8,15-j*4,29-j*6,0,0,7);c.fill();}
+    for(var i=0;i<32;i++){var f=(t*.18+i*.113)%1;c.globalAlpha=p*(1-f)*.7;c.fillStyle='#ffe3a0';c.fillRect(A.x+Math.sin(i*12+f)*75,A.y-f*155,2,3);}
+    c.restore();
+  };
+  function clampEntrance(n){return Math.max(0,Math.min(1,n));}
+  Renderer.prototype.drawEntranceCaption=function(game){
+    var a=game.entranceScene;if(!a||game.state!=='intro')return;var c=this.ctx,w=this.w,h=this.h;
+    c.save();var fade=Math.min(1,a.time/.3,(a.duration-a.time)/.35);c.globalAlpha=clampEntrance(fade);
+    var mist=c.createRadialGradient(w/2,h*.46,60,w/2,h*.46,w*.64);mist.addColorStop(0,'rgba(4,12,18,0)');mist.addColorStop(.6,'rgba(4,12,18,.12)');mist.addColorStop(1,'rgba(4,12,18,.65)');c.fillStyle=mist;c.fillRect(0,0,w,h);
+    c.fillStyle='rgba(3,10,15,.87)';c.fillRect(0,0,w,27);c.fillRect(0,h-77,w,77);
+    c.textAlign='center';c.textBaseline='middle';c.fillStyle='#e5c488';c.font='bold 21px sans-serif';c.fillText(a.title,w/2,h-52);
+    c.fillStyle='#becac5';c.font='12px sans-serif';c.fillText(a.subtitle,w/2,h-25);
+    c.strokeStyle='rgba(196,162,103,.45)';c.lineWidth=1;c.beginPath();c.moveTo(w*.2,h-76);c.lineTo(w*.8,h-76);c.stroke();c.restore();
   };
 
   /* ==================== 主绘制 ==================== */
@@ -237,8 +399,10 @@
     ctx.translate(-game.cam.x, -game.cam.y);
 
     ctx.drawImage(this.ground, 0, 0);
-    this.drawRocks(game.world.rocks);
-    this.drawWalls(game.world.walls || []);    // 墙（地形）
+    this.drawRocks(game.world.rocks.filter(function(o){return !o.landmark;}));
+    this.drawWalls((game.world.walls || []).filter(function(o){return !o.ruin;}));
+    this.drawRealmScene(game,t);
+    this.drawChapterEntrances(game,t);this.drawDawn(game,t);    // 墙（地形）
     this.drawHazards(game.hazards || []);      // 地面威胁画在最底下（贴地）
     this.drawTelegraph(game.foes);
     this.drawPickups(game.pickups, t);
@@ -280,10 +444,10 @@
     this.drawTideWarning(game,t);
     this.drawSwarmBanner(game.swarmWarn, t, game.swarmCount);   // 边缘泛红 + 顶部小字（屏幕空间）
     if (!game.training && !game.cfg.trial.enabled) this.drawMinimap(game);   // 试炼场不需要小地图（底栏要占位置）
-    this.drawHud(game, P);
+    if(!game.entranceScene&&!game.victoryScene)this.drawHud(game, P);
     this.drawScrollGuides(game);        // 掉在屏幕外的技能卷轴：边缘箭头指路（"不消失"必须配指路）
     if (game.training) this.drawTrainingBar(game);
-    this.drawStageHud(game);
+    if(!game.entranceScene&&!game.victoryScene)this.drawStageHud(game);
     if (game.state === 'play') this.drawFrenzyControl(game, t);
     /* 武器库入口（左下角）：只在打的时候、且手里不止一把武器时出现 */
     /* ⚠️ 2026-10 用户口径（页面简洁）：左下角那个「武器库」按钮**整个删掉** ——
@@ -292,7 +456,8 @@
           必须**一起删干净**（留一半就是一个看不见的热区/永远不会触发的分支 —— 技能格那次踩过）。 */
     if (game.state === 'levelup') this.drawCards(game);
     if (game.state === 'dead') this.drawGameOver(game);
-    if (game.state === 'intro') this.drawStageIntro(game);
+    if (game.state === 'intro'&&!game.entranceScene&&!game.victoryScene) this.drawStageIntro(game);
+    this.drawEntranceCaption(game);
     if (game.state === 'clear') this.drawClearPanel(game);        // 通关成功面板
     if (game.state === 'bag') this.drawBagPanel(game);             // 武器库（换武器）
     if (game.state === 'trialcards') this.drawTrialCardPanel(game); // 试炼场·试卡（点名试用某张卡）
@@ -306,7 +471,8 @@
    * 以及 updateLevelUp 里"点在按钮上的手不算选卡"那条排除（按钮没了，那条就是死分支）。
    */
 
-  /** 面板顶部的两个页签：武器 / 属性（矩形来自 game.bagTabs —— 渲染和判定共用） */
+  /** 面板顶部的页签：武器 / 技能 / 熟练度 / 属性（2026-10 从两个加到四个；
+      矩形来自 game.bagTabs —— 渲染和判定共用，别再在这儿写死个数） */
   Renderer.prototype.drawBagTabs = function (game) {
     var ctx = this.ctx, tabs = game.bagTabs();
     ctx.save();
@@ -402,6 +568,7 @@
     /* 顶部两个页签取代了原来那行标题（垂直空间紧，标题的信息页签已经说了） */
     this.drawBagTabs(game);
     if (game.bagTab === 'skills') { this.drawSkillPanel(game); ctx.restore(); return; }
+    if (game.bagTab === 'mastery') { this.drawMasteryPanel(game); ctx.restore(); return; }
     if (game.bagTab === 'stats') {
       this.drawStatPanel(game);
       ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
@@ -443,15 +610,21 @@
       ctx.fillStyle = 'rgba(255,255,255,.66)';
       ctx.fillText(a0 ? (a0.label + ' ' + (a0.negate ? '-' : '+') + Math.abs(a0.v)) : '',
         r.x + r.w / 2, r.y + r.h * 0.46 + 16);
+      /* 技能名 + 独有机制：**从卡片底部往上锚**，不是各写一个死数字。
+         ⚠️ 2026-10 出图核出来的老 bug：技能名原来是 `r.y + r.h - 35 + si * 18` —— 按**2 张**算的；
+            长剑熟练度 Lv2 之后是 **3 张** ⇒ 第 3 行落在 `r.h + 1`，文字（11px）最低到 `r.h + 6.5`，
+            卡片下边框正好从"剑阵回响"中间穿过去。跟卡片多高无关（公式本身就溢出）。
+            现在：最后一行贴底 12px，往上每行 18px ⇒ 2 张 / 3 张都在框内，行距一点没变。 */
+      var skills = game.weaponSkillRows(it.kind);
+      var s0 = r.y + r.h - 12 - (Math.max(1, skills.length) - 1) * 18;
+      ctx.font = '11px ' + FONT;
       ctx.fillStyle = 'rgba(255,255,255,.48)';
       ctx.fillText(wdef.trait ? ('独有：' + wdef.trait.label) : '独有机制：无',
-        r.x + r.w / 2, r.y + r.h - 56);
-
-      var skills = game.weaponSkillRows(it.kind);
+        r.x + r.w / 2, s0 - 26);
       for (var si = 0; si < skills.length; si++) {
         ctx.font = '11px ' + FONT;
         ctx.fillStyle = skills[si].owned ? (cur ? '#ffd166' : '#9fd9c9') : '#80909d';
-        ctx.fillText((skills[si].owned ? '● ' : '○ ') + skills[si].name, r.x + r.w / 2, r.y + r.h - 35 + si * 18);
+        ctx.fillText((skills[si].owned ? '● ' : '○ ') + skills[si].name, r.x + r.w / 2, s0 + si * 18);
       }
       if (cur) {
         ctx.textAlign = 'right';
@@ -471,49 +644,129 @@
     ctx.restore();
   };
 
+  /**
+   * 武器库里的**一行表**（2026-10）：「左列 = 名字 + 小字状态 / 右列 = 说明全文」。
+   * 「技能」页（一行一张技能）和「熟练度」页（一行一级奖励）**共用这一个画法** ——
+   * 两页因此天生左列对齐、同一套达成色。别再各画一份（"同一个数写两处"那类坑在这最容易复发）。
+   *
+   * tone: 'on'   = 当前这把 / 当前等级（金）
+   *       'done' = 已经拿到 / 已达成（绿）
+   *       'off'  = 还没有（灰）
+   * ⚠️ 说明是**竖着居中**的：一行/两行都居中，不会被拉成"顶着上边"（出图核过）。
+   * ⚠️ 左列宽度固定（占行宽 32%，上限 220）—— 右列说明的起点必须对齐成一列，不然一行一个位置。
+   */
+  Renderer.prototype.drawInfoRow = function (ctx, x, y, w, h, label, sub, text, tone, wrap) {
+    var col = Math.min(220, Math.round(w * 0.32));
+    pathRoundRect(ctx, x, y, w, h, 9);
+    ctx.fillStyle = tone === 'on' ? 'rgba(255,209,102,.10)'
+                  : (tone === 'done' ? 'rgba(143,214,165,.07)' : 'rgba(255,255,255,.03)');
+    ctx.fill();
+    ctx.strokeStyle = tone === 'on' ? 'rgba(255,209,102,.55)'
+                    : (tone === 'done' ? 'rgba(143,214,165,.40)' : 'rgba(255,255,255,.13)');
+    ctx.lineWidth = 1.4; ctx.stroke();
+
+    ctx.textBaseline = 'middle'; ctx.textAlign = 'left';
+    ctx.font = '700 13.5px ' + FONT;
+    ctx.fillStyle = tone === 'on' ? '#ffd166' : (tone === 'done' ? '#9fd9c9' : 'rgba(255,255,255,.74)');
+    ctx.fillText(label, x + 12, y + h / 2 - 8);
+    ctx.font = '10.5px ' + FONT;
+    ctx.fillStyle = tone === 'off' ? 'rgba(255,255,255,.36)' : 'rgba(255,255,255,.46)';
+    ctx.fillText(sub || '', x + 12, y + h / 2 + 9);
+
+    if (text) {
+      var tx = x + col + 14, maxW = w - col - 26, fs = 12.5;
+      ctx.font = fs + 'px ' + FONT;
+      var lines = wrap(text, maxW);
+      while (fs > 10 && lines.length * 16 > h - 8) { fs -= 0.5; ctx.font = fs + 'px ' + FONT; lines = wrap(text, maxW); }
+      ctx.fillStyle = tone === 'on' ? 'rgba(255,233,186,.94)'
+                    : (tone === 'done' ? 'rgba(228,234,238,.88)' : 'rgba(255,255,255,.5)');
+      var ly = y + h / 2 - (lines.length - 1) * 8, k;
+      for (k = 0; k < lines.length; k++) { ctx.fillText(lines[k], tx, ly); ly += 16; }
+    }
+  };
+
+  /**
+   * 武器库 ·「技能」页。**2026-10 起只画一块：这把武器的全部技能**，一行一张。
+   * （熟练度奖励原来压在这页下半块 → 独立成「熟练度」页，见 drawMasteryPanel。
+   *  用户口径："技能模块看着有点错乱"，一页两块谁都放不开。）
+   *
+   * ⚠️ 2026-10 从"一排高卡片"改成"一行一张"：熟练度搬走之后卡片被拉到 173px 高、
+   *    字只占上面 50px，下面全空（出图核出来的）；改成一档一行既填满整页，
+   *    又和「熟练度」页共用 drawInfoRow（两页长得一样是有意的）。
+   * ⚠️ 列数/行数按**实际张数**算 —— 长剑熟练度 Lv2 之后是 3 张技能。
+   *    原来是写死 `(r.body.w - gap) / 2` 两列，第 3 张会画到 body 右边**外面**：
+   *    面板看着没坏，就是"这张技能根本不存在"（用户 2026-10 就是这么发现"看不到所有技能"的）。
+   * ⚠️ 这里不拼 "Lv"、不算等级、不拼奖励文案：技能行来自 weaponSkillRows。
+   */
   Renderer.prototype.drawSkillPanel = function (game) {
     var ctx = this.ctx, r = game.skillPanelRects(), kind = game.skillViewKind || game.weaponKind();
-    for (var i = 0; i < r.tabs.length; i++) this.drawBtn(r.tabs[i], this.cfg.weapons[r.tabs[i].kind].name,
-      r.tabs[i].kind === kind ? 'primary' : 'ghost', 12);
-    /* ⚠️ 列数按**实际张数**算 —— 长剑熟练度 Lv2 之后是 3 张技能。
-       原来是写死 `(r.body.w - gap) / 2` 两列，第 3 张会画到 body 右边**外面**：
-       面板看着没坏，就是"这张技能根本不存在"（用户 2026-10 就是这么发现"看不到所有技能"的）。 */
-    var rows = game.weaponSkillRows(kind), n = Math.max(1, rows.length), gap = 12;
-    var w = (r.body.w - gap * (n - 1)) / n;
-    for (i = 0; i < rows.length; i++) {
-      var row = rows[i], x = r.body.x + i * (w + gap), y = r.body.y;
-      ctx.fillStyle = '#111e29'; ctx.fillRect(x, y, w, r.body.h);
-      ctx.strokeStyle = row.owned ? '#d1b166' : '#42515c'; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, r.body.h);
-      ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-      ctx.font = '700 15px ' + FONT; ctx.fillStyle = row.owned ? '#ffd166' : '#bdc7ce';
-      ctx.fillText(row.name, x + 12, y + 10);
-      ctx.font = '11px ' + FONT; ctx.fillStyle = row.owned ? '#9fd9c9' : '#8999a6';
-      ctx.fillText(row.status, x + 12, y + 32);
-      /* 描述：列一窄（3 张时）就装不下，先按 13px 排、放不下降字号 —— 别让字出格 */
-      var dfs = 13, dlh = 19, maxW = w - 24, dl;
-      while (true) {
-        ctx.font = dfs + 'px ' + FONT;
-        dl = []; var ln = '';
-        for (var j2 = 0; j2 < row.desc.length; j2++) {
-          if (ln && ctx.measureText(ln + row.desc[j2]).width > maxW) { dl.push(ln); ln = ''; }
-          ln += row.desc[j2];
-        }
-        if (ln) dl.push(ln);
-        if (dfs <= 10.5 || y + 54 + dl.length * dlh <= y + r.body.h - 6) break;
-        dfs -= 0.5;
-      }
-      ctx.font = dfs + 'px ' + FONT; ctx.fillStyle = '#dae4ed';
-      var lineY = y + 54;
-      for (var j = 0; j < dl.length; j++) { ctx.fillText(dl[j], x + 12, lineY); lineY += dlh; }
+    var rows = game.weaponSkillRows(kind), cur = (kind === game.weaponKind());
+    var i, owned = 0;
+    for (i = 0; i < r.tabs.length; i++) {
+      this.drawBtn(r.tabs[i], this.cfg.weapons[r.tabs[i].kind].name,
+        r.tabs[i].kind === kind ? 'primary' : 'ghost', 12);
     }
+
+    var SB = r.skills, gap = 8, listH = SB.h - 26;
+    for (i = 0; i < rows.length; i++) if (rows[i].owned) owned++;
+    this.panelHead(ctx, SB, '技能', '已获得 ' + owned + ' / ' + rows.length, '#e8ecef');
+    var rh = rows.length ? (listH - gap * (rows.length - 1)) / rows.length : listH;
+    var wrap = this.wrapText.bind(this, ctx);
+    for (i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      /* 已拿到 + 这把武器正拿着 = 金（生效中）；拿到但换着别的武器 = 绿（装上就生效）；没拿到 = 灰 */
+      this.drawInfoRow(ctx, SB.x, SB.y + 26 + i * (rh + gap), SB.w, rh,
+        row.name, row.status, row.desc, row.owned ? (cur ? 'on' : 'done') : 'off', wrap);
+    }
+
     ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '11px ' + FONT; ctx.fillStyle = '#b8c6cf';
-    var owned = rows.filter(function (c) { return c.owned; }).length;
-    /* 提示按**实际张数**说（长剑 3 张，不能再判 `owned === 2`）；
-       旧那句"第二张：第二波起…"是"技能走三选一"时代的节奏，2026-10 改成精英掉卷轴之后已经过时了。 */
+    /* 提示按**实际张数**说（长剑 3 张，不能再判 `owned === 2`） */
     var hint = owned >= rows.length ? '技能本局保留 · 切回对应武器生效'
              : (owned > 0 ? '还有技能没拿到 · 精英怪会掉技能卷轴'
                           : '精英怪掉技能卷轴 · 捡起即学会');
-    ctx.fillText(hint + ' · 点空白返回', this.w / 2, this.h - 15 - (this.insets.bottom || 0));
+    ctx.fillText(hint + ' · 熟练度奖励在「熟练度」页 · 点空白返回', this.w / 2, this.h - 15 - (this.insets.bottom || 0));
+  };
+
+  /**
+   * 武器库 ·「熟练度」页（= 熟练度奖励）。**2026-10 新开：从技能页下半块搬出来独立成页**
+   * （用户口径："技能模块把熟练度去掉，新加一个熟练度奖励模块"）。
+   * 一页说清两件事：① 现在练到哪了（顶部进度条）② 每级给什么（Lv1~LvN 一级一行）。
+   *
+   * ⚠️ 一块新画的都没有：进度行走 game.masteryInfo + drawMasteryBlock（**和结算页同一个画法**），
+   *    每级一行走 game.codexMasteryRows + drawInfoRow（**和技能页同一个画法**）。
+   *    渲染层只负责摆位置，等级 / 门槛 / 奖励文案一个字都不在这里拼。
+   * ⚠️ 不另外画「熟练度奖励」这个页标题：页签已经写着熟练度，进度行自己也写着"长剑熟练度"，
+   *    再加一行标题只会挤掉一行奖励（出图核过一版，那一版标题和进度数字挤在同一行）。
+   * ⚠️ drawMasteryBlock 会把 textAlign 改成 left/right，画完必须还原成 center —— 脚注是居中的。
+   */
+  Renderer.prototype.drawMasteryPanel = function (game) {
+    var ctx = this.ctx, r = game.masteryPanelRects();
+    var kind = game.skillViewKind || game.weaponKind();
+    var mrows = game.codexMasteryRows(kind), mi = game.masteryInfo(kind);
+    var i;
+    for (i = 0; i < r.tabs.length; i++) {
+      this.drawBtn(r.tabs[i], this.cfg.weapons[r.tabs[i].kind].name,
+        r.tabs[i].kind === kind ? 'primary' : 'ghost', 12);
+    }
+
+    /* ① 现在练到哪了：当前点数 / 本级上限 + 进度条 + 下一级给什么（结算页那块原样搬来）。
+       ⚠️ 传的 cx 不是屏幕中心：drawMasteryBlock 的块半宽固定 180、内容从 cx-180 起，
+          所以 cx = 行左缘 + 12 + 180 才能让**进度行和下面每级的行左缘对齐**
+          （用户口径：同屏并列不齐很怪 —— 居中的话这块会缩在中间，和整宽的行差一截）。 */
+    this.drawMasteryBlock(ctx, game, mi, r.list.x + 12 + 180, r.progress.y + 12);
+
+    /* ② 每级给什么：一级一行（等级 + 门槛 + 奖励全文；当前金、已达成绿、没到灰） */
+    var wrap = this.wrapText.bind(this, ctx);
+    for (i = 0; i < mrows.length; i++) {
+      var row = mrows[i];
+      this.drawInfoRow(ctx, r.list.x, r.list.y + i * (r.rowH + r.rowsGap), r.list.w, r.rowH,
+        row.label, row.needText, row.text, row.current ? 'on' : (row.reached ? 'done' : 'off'), wrap);
+    }
+
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = '11px ' + FONT;
+    ctx.fillStyle = '#b8c6cf';
+    ctx.fillText('熟练度靠通关累积（精英 +45 / 通关 +90）· 每级约两局 · 点空白返回',
+      this.w / 2, this.h - 15 - (this.insets.bottom || 0));
   };
 
   /** 冲击波 / 爆散 等世界坐标特效 */
@@ -706,7 +959,7 @@
 
     var y = top + 30;
     ctx.fillStyle = '#8fd6a5'; ctx.font = '600 22px ' + FONT;
-    ctx.fillText('第 ' + s.stage + ' 关　通关！', cx, y);
+    ctx.fillText(ci.complete?'第一章完成 · 晨火已燃':'第 ' + s.stage + ' 关　通关！', cx, y);
     y += 20;
     ctx.fillStyle = '#9aa0a6'; ctx.font = '13px ' + FONT;
     ctx.fillText(s.name || '', cx, y);
@@ -759,10 +1012,18 @@
     /* 熟练度块插在"这关拿到什么"下面（和死亡结算页共用同一个画法，一处改两处生效）。
        ⚠️ drawMasteryBlock 会把 textAlign 改成 left/right，画完必须还原成 center ——
           后面那两行"下一关 / 点任意处继续"是靠居中的。 */
-    this.drawMasteryBlock(ctx, game, game.masteryInfo(), cx, y + 16);
+    var actual=game.masteryInfo(),display=actual;
+    if(ci.complete&&typeof game.rewardReveal==='number'){
+      var progress=Math.min(1,game.rewardReveal/1.4),points=Math.round(actual.pts-actual.gainedRun*(1-progress));
+      display=Object.assign({},actual,game.Prog.masteryInfo(points,game.cfg));
+      display.gainedRun=Math.round(actual.gainedRun*progress);
+    }
+    this.drawMasteryBlock(ctx, game, display, cx, y + 16);
+    var prior=game.Prog.masteryLevel(Math.max(0,actual.pts-actual.gainedRun),game.cfg);
+    if(actual.level>prior){ctx.textAlign='right';ctx.fillStyle='#ffe09b';ctx.font='bold 11px '+FONT;ctx.fillText('熟练度提升 · Lv'+actual.level,cx+cw/2-14,top+50);}
     ctx.textAlign = 'center';
     ctx.fillStyle = '#b9b6b0'; ctx.font = '13px ' + FONT;
-    ctx.fillText(game.rankEligible&&game.rankResult ? game.rankResult.text : ci.complete ? '荒原试炼完成 · 换把武器再挑战' : '下一关：第 ' + (ci.stage || '?') + ' 关 · ' + (ci.name || ''), cx, top + ch - 36);
+    ctx.fillText(game.rankEligible&&game.rankResult ? game.rankResult.text : ci.complete ? '晨火已燃 · 第二章：迷雾旧镇（开发中）' : '下一关：第 ' + (ci.stage || '?') + ' 关 · ' + (ci.name || ''), cx, top + ch - 36);
     var pulse = game.clearGuard > 0 ? 0.35 : (0.55 + 0.45 * Math.abs(Math.sin((this.lastT || 0) * 3.2)));
     ctx.fillStyle = 'rgba(255,209,102,' + pulse.toFixed(2) + ')';
     ctx.font = '600 14px ' + FONT;
@@ -1392,7 +1653,8 @@
       var ef = foes[ai];
       if (!ef || !this.inView(ef, 160)) continue;
       var named = !!(ef.trialElite || ef.kind === 'boss');
-      if (!ef.affix && !named) continue;               // 既没词缀又不是精英/Boss：跳过
+      if (!ef.affix && !named) continue;
+      if(ef.arrival&&ef.arrival.elapsed<ef.arrival.total)continue;               // 既没词缀又不是精英/Boss：跳过
       var ap = 0.5 + 0.5 * Math.sin(t * 5 + ai);
       /* 围着身体的那圈（呼吸圈）：**Boss 不画**。2026-10 用户口径："为啥看 boss 很怪，
          有两个圈——底下一个圆圈，周围一个圆圈？周围的圆圈去掉吧"。
@@ -1418,6 +1680,11 @@
     for (var i = 0; i < foes.length; i++) {
       var f = foes[i];
       if (!this.inView(f, 160)) continue;
+      var arriving=f.arrival&&f.arrival.elapsed<f.arrival.total;
+      if(arriving){var ar=f.arrival,u=clampEntrance(ar.elapsed/ar.total),ease=u*u*(3-2*u);ctx0.save();ctx0.globalAlpha*=ease;
+        if(f.kind==='boss'){ctx0.beginPath();ctx0.rect(f.x-190,f.y-220,380,260);ctx0.clip();ctx0.translate(0,(1-ease)*105);}
+        else {ctx0.translate((ar.site.x-f.x)*(1-ease),(ar.site.y+12-f.y)*(1-ease));ctx0.translate(f.x,f.y);ctx0.scale(.7+.3*ease,.35+.65*ease);ctx0.translate(-f.x,-f.y);}
+      }
       var elite = !!(f.affix && f.kind !== 'boss');
       if (elite) {                       // 精英略大一圈：远看就能分出"这只不一样"
         ctx0.save();
@@ -1430,7 +1697,7 @@
       else this.drawCreature(f, t);          // jelly / cone / shell / sac / husk
       if (elite) ctx0.restore();
       /* 精英 / Boss 头顶名字（紫色）：只这两类有专属名字，见 drawFoeName。 */
-      if (f.trialElite || f.kind === 'boss') this.drawFoeName(f);
+      if (!arriving&&(f.trialElite || f.kind === 'boss')) this.drawFoeName(f);
       if (f.kind !== 'boss' && f.hp < f.maxhp) {
         var ctx = this.ctx;
         ctx.fillStyle = 'rgba(0,0,0,.55)';
@@ -1438,6 +1705,7 @@
         ctx.fillStyle = '#e06c6c';
         ctx.fillRect(f.x - 16, f.y - f.r - 13, 32 * (f.hp / f.maxhp), 4);
       }
+      if(arriving)ctx0.restore();
     }
   };
 
@@ -3773,6 +4041,36 @@
     ctx.restore();
   };
 
+  /**
+   * 三个并排的小开关（音乐 / 音效 / 震动）—— 暂停面板 2026-10 把这三行并成了一行。
+   * 为什么并：多一行「武器库」后面板 7 行 434px，横屏 812x375 出屏 70px。
+   *
+   * ⚠️ 矩形**不在这里算** —— 每个小开关的 x/y/w/h 全部来自 `game.pauseSwitchRects()`
+   *    （经 `pauseRects().rows[kind='switches'].toggles` 拿），判定用的是同一份。
+   * ⚠️ 样式故意比 `drawToggleRow` 的实心胶囊**淡**：只描个边 + 极浅底色，
+   *    状态靠下面那行 11px 的「开 / 关」字（用户口径：表现要小要淡，忌实心块）。
+   */
+  Renderer.prototype.drawSwitchRow = function (row, settings) {
+    var ctx = this.ctx, ts = row.toggles || [];
+    for (var i = 0; i < ts.length; i++) {
+      var c = ts[i], on = !!(settings && settings[c.id]);
+      ctx.save();
+      pathRoundRect(ctx, c.x, c.y, c.w, c.h, 8);
+      ctx.fillStyle = on ? 'rgba(143,214,165,.13)' : 'rgba(255,255,255,.045)';
+      ctx.fill();
+      ctx.strokeStyle = on ? 'rgba(143,214,165,.5)' : 'rgba(255,255,255,.12)';
+      ctx.lineWidth = 1; ctx.stroke();
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = '13px ' + FONT;
+      ctx.fillStyle = on ? '#cfe9d8' : '#dfe4e8';
+      ctx.fillText(c.label, c.x + c.w / 2, c.y + 11);
+      ctx.font = '600 11px ' + FONT;
+      ctx.fillStyle = on ? '#8fd6a5' : '#9aa2a9';
+      ctx.fillText(on ? '开' : '关', c.x + c.w / 2, c.y + 27);
+      ctx.restore();
+    }
+  };
+
   /** 面板（暂停 / 设置共用）：深色卡 + 标题 + 一列按钮或开关 */
   Renderer.prototype.drawPanel = function (game, R) {
     var ctx = this.ctx;
@@ -3790,7 +4088,8 @@
 
     for (var i = 0; i < R.rows.length; i++) {
       var b = R.rows[i];
-      if (b.kind === 'toggle') this.drawToggleRow(b, !!(game.settings && game.settings[b.id]));
+      if (b.kind === 'switches') this.drawSwitchRow(b, game.settings);   // 音乐/音效/震动 并成一行
+      else if (b.kind === 'toggle') this.drawToggleRow(b, !!(game.settings && game.settings[b.id]));
       else if (b.kind === 'locked' || b.kind === 'current') this.drawLockRow(b);
       else this.drawBtn(b, b.label, b.kind === 'primary' ? 'primary' : 'ghost', 15);
     }
@@ -4090,6 +4389,59 @@
   };
 
   /**
+   * 按可用宽度把一段话拆成行。图鉴 和 武器库「技能」页 共用一份 —— 别再各写一个。
+   *
+   * 中文没有词边界，逐字拆；但**要守两条中文排版规则**，否则窄格里会出很丑的孤儿行
+   * （2026-10 出图核出来的：`打完 Boss 有几率掉落 「双刀」` 被拆成 `…掉落 「双刀` + `」`，
+   *   一个右引号独占一行；`…「剑阵回响」（` + `精英掉落）` 则是行尾挂个左括号）：
+   *   ① 成对括号/引号（「」『』（）【】《》）当成**一个不可拆的单元** —— 不在中间断行；
+   *   ② 避头点（，。、；：？！）】》」』…）不能当**行首**：真装不下时，把上一单元一起带到下一行。
+   * 没配对的括号按单字处理（配置里手滑漏一个也不会把整页弄崩）。
+   */
+  var WRAP_NO_HEAD = '，。、；：？！）】》」』％%…·',
+      WRAP_PAIRS = { '（': '）', '【': '】', '《': '》', '「': '」', '『': '』' };
+  Renderer.prototype.wrapText = function (ctx, text, maxW) {
+    var cells = [], i = 0;
+    while (i < text.length) {
+      var ch = text[i], close = WRAP_PAIRS[ch];
+      if (close) {
+        var end = text.indexOf(close, i + 1);
+        if (end > i) { cells.push(text.slice(i, end + 1)); i = end + 1; continue; }
+      }
+      cells.push(ch); i++;
+    }
+    var out = [], line = [];
+    for (i = 0; i < cells.length; i++) {
+      var c = cells[i];
+      if (line.length && ctx.measureText(line.join('') + c).width > maxW) {
+        if (WRAP_NO_HEAD.indexOf(c[0]) >= 0 && line.length > 1) {
+          var carry = line.pop();                       // 避头点：上一单元陪着一起换行
+          out.push(line.join(''));
+          line = [carry, c];
+          continue;
+        }
+        out.push(line.join('')); line = [c];
+        continue;
+      }
+      line.push(c);
+    }
+    if (line.length) out.push(line.join(''));
+    return out;
+  };
+
+  /** 一块内容的标题行：**左边一句、右边一句读数**（读数没有就不画）。图鉴 / 技能页共用。 */
+  Renderer.prototype.panelHead = function (ctx, box, left, right, color) {
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.font = '600 13px ' + FONT; ctx.fillStyle = color || 'rgba(255,255,255,.72)';
+    ctx.fillText(left, box.x, box.y + 11);
+    if (right) {
+      ctx.textAlign = 'right'; ctx.font = '11px ' + FONT;
+      ctx.fillStyle = 'rgba(255,255,255,.46)';
+      ctx.fillText(right, box.x + box.w, box.y + 11);
+    }
+  };
+
+  /**
    * 武器图鉴页（2026-10 · 首页 · 用户选的 Aa / Ba）。一把武器一个页签，页内两块：
    *   ① 技能：这把武器**全部**技能 —— 名字 / 状态 / **描述全文**（Ba：没拿到也显示完整描述）
    *   ② 熟练度：Lv1~LvN 每级给什么（内容还没配的等级**留白**，不写"待开发"）
@@ -4112,27 +4464,11 @@
     var owned = 0, i, j;
     for (i = 0; i < skills.length; i++) if (skills[i].owned) owned++;
 
-    /* 按可用宽度把一段话拆成行（中文逐字拆；图鉴里描述要显示全文） */
-    function wrap(text, maxW) {
-      var out = [], line = '';
-      for (var k = 0; k < text.length; k++) {
-        if (line && ctx.measureText(line + text[k]).width > maxW) { out.push(line); line = ''; }
-        line += text[k];
-      }
-      if (line) out.push(line);
-      return out;
-    }
-    /* 一块的标题行：左边一句、右边一句读数 */
-    function head(box, left, right, color) {
-      ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-      ctx.font = '600 13px ' + FONT; ctx.fillStyle = color || 'rgba(255,255,255,.72)';
-      ctx.fillText(left, box.x, box.y + 11);
-      if (right) {
-        ctx.textAlign = 'right'; ctx.font = '11px ' + FONT;
-        ctx.fillStyle = 'rgba(255,255,255,.46)';
-        ctx.fillText(right, box.x + box.w, box.y + 11);
-      }
-    }
+    /* 拆行 / 块标题这两件工具搬到了 Renderer.prototype（图鉴 和 武器库「技能」页 共用一份）——
+       这里保留同名局部函数，是为了让页内那一堆调用点一个字都不用改。 */
+    var self = this;
+    function wrap(text, maxW) { return self.wrapText(ctx, text, maxW); }
+    function head(box, left, right, color) { self.panelHead(ctx, box, left, right, color); }
 
     ctx.save();
     /* 整页底 + 内容框（和「游戏介绍」那页同一套观感） */
@@ -4149,6 +4485,7 @@
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.font = '700 14px ' + FONT; ctx.fillStyle = '#ffd166';
     var nm = wdef.name || kind;
+    if(game.homeLibrary){var has=(game.player.bag||[]).some(function(it){return it&&it.kind===kind;});nm+=' · '+(kind==='sword'||has?'已获得':'未获得');}
     ctx.fillText(nm, r.panel.x + 14, nameY);
     var nw = ctx.measureText(nm).width;
     ctx.font = '11px ' + FONT; ctx.fillStyle = 'rgba(255,255,255,.5)';
@@ -4158,7 +4495,7 @@
     var SB = r.skills, MB = r.mastery;
 
     /* ============ ① 技能 ============ */
-    head(SB, '技能', '已获得 ' + owned + ' / ' + skills.length, '#e8ecef');
+    head(SB, '技能', game.homeLibrary?'技能图鉴 · 局内获取':'已获得 ' + owned + ' / ' + skills.length, '#e8ecef');
     if (style === 'B') {
       /* 竖列表：一张技能一行（名字 + 状态 + 描述全文） */
       var ry = SB.y + 26, rgap = 8;

@@ -388,20 +388,21 @@ assert(cfg.trial.elite[0].hp<cfg.trial.elite[1].hp,'教学精英要比第 2 波�
   assert(mig2.trial.skillTaken===true&&mig2.wave>=1,'读档后能继续打');
 }
 
-/* ==================== ④ 武器库「技能」页照旧（来源改了，入口 2026-10 搬到了暂停面板） ==================== */
+/* ==================== ④ 武器库「技能」页照旧（入口 2026-10 从首页图鉴搬回暂停面板） ==================== */
 {
   const g=make();g.state='play';g.bagGuard=0;
-  /* 入口：暂停 → 「换武器」（左下角那个按钮已删，用户口径"页面简洁一点"）。
-     先给两把武器，否则「换武器」那一行不存在。 */
+  /* 入口：暂停 → 第一行「武器库」（左下角那个 HUD 按钮早就删了，
+     2026-10 起首页那个「武器图鉴」按钮也摘掉了 —— 这里是唯一入口，且**恒显**）。 */
   const first=g.player.bag[0];
   const second=deps.Progression.makeDefaultWeapon(cfg);second.id='w2';second.kind='spear';
   g.player.bag=[first,second];
   g.pause();assert.equal(g.state,'paused');
   const bagRow=g.pauseRects().rows.find(r=>r.id==='bag');
-  assert(bagRow,'暂停面板里要有「换武器」一行');
+  assert(bagRow,'暂停面板里要有「武器库」一行');
+  assert.equal(bagRow.label,'武器库','那一行文案 = 武器库（不再是「换武器」——一把武器时它也是个"查看"入口）');
   g.pauseGuard=0;
   g.updatePaused({tap:{x:bagRow.x+5,y:bagRow.y+5}});
-  assert.equal(g.state,'bag','点暂停面板的「换武器」要能开武器库');
+  assert.equal(g.state,'bag','点暂停面板的「武器库」要能开武器库');
   assert.notEqual(g.bagTab,'skills','不再有"点技能格直接进技能页"这条捷径了');
   g.bagGuard=0;
   const skillsTab=g.bagTabs().find(t=>t.id==='skills');
@@ -410,17 +411,28 @@ assert(cfg.trial.elite[0].hp<cfg.trial.elite[1].hp,'教学精英要比第 2 波�
   g.bagGuard=0;
   const tab=g.skillPanelRects().tabs.find(t=>t.kind==='staff');
   g.updateBag({tap:{x:tab.x+4,y:tab.y+4}});
-  assert.equal(g.skillViewKind,'staff');assert.equal(g.weaponKind(),'sword');g.closeBag();assert.equal(g.state,'play');
+  assert.equal(g.skillViewKind,'staff');assert.equal(g.weaponKind(),'sword');
+  /* ⚠️ 2026-10 用户口径：「关掉武器库回到暂停面板」—— 不是直接接着打，由玩家自己点「继续」 */
+  g.closeBag();assert.equal(g.state,'paused','关掉武器库要回暂停面板');
   /* 两个"已经不存在的热区"都不能再开面板：底部原来的技能格位置、左下角原来的武器库按钮位置 */
-  g.bagGuard=0;
+  g.pauseGuard=0;g.bagGuard=0;g.state='play';
   g.update(.01,{tap:{x:812/2-122+5,y:375-38+5}});
   assert.notEqual(g.state,'bag','屏幕底部原来技能格的位置不能再开面板（隐形热区）');
-  g.bagGuard=0;
+  g.pauseGuard=0;g.bagGuard=0;g.state='play';
   g.update(.01,{tap:{x:16+20,y:375-54-34+20}});
   assert.notEqual(g.state,'bag','左下角原来武器库按钮的位置不能再开面板（隐形热区）');
-  /* 手里只有一把武器时，「换武器」那一行不该出现（前半局面板和以前一样干净） */
+  /* ⚠️ 手里只有一把武器时，「武器库」那一行**照样要在**（2026-10 改：
+     以前是 `bag.length >= 2` 才出现 ⇒ 开局只有长剑时这条路等于不存在）。 */
   const one=make();one.state='play';one.pause();
-  assert(!one.pauseRects().rows.some(r=>r.id==='bag'),'只有一把武器时暂停面板里不该有「换武器」');
+  const oneBag=one.pauseRects().rows.find(r=>r.id==='bag');
+  assert(oneBag,'只有一把武器时暂停面板里也要有「武器库」（进去看技能/属性，只是没得换）');
+  assert.equal(one.pauseRects().rows[0].id,'bag','「武器库」是第一行');
+  /* 一把武器时点它照样能开（面板里就是唯一那张卡，点空白关掉） */
+  one.pauseGuard=0;
+  one.updatePaused({tap:{x:oneBag.x+5,y:oneBag.y+5}});
+  assert.equal(one.state,'bag','一把武器时「武器库」也要能打开');
+  one.bagGuard=0;one.closeBag();
+  assert.equal(one.state,'paused','关掉还是回暂停面板');
   /* 废弃的 bagBtnRect 只许返回 null（留着是给老工具的兜底，别再当热区用） */
   assert.equal(one.bagBtnRect(),null,'bagBtnRect 已废弃，必须返回 null');
 }
